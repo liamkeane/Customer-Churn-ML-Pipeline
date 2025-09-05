@@ -1,7 +1,5 @@
 # Bank Customer Churn Prediction
 
-
-
 ## Fields
 - RowNumber: The sequential number assigned to each row in the dataset.
 - CustomerId: A unique identifier for each customer.

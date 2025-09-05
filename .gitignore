@@ -1,0 +1,21 @@
+# Data files
+data/raw/*.csv
+data/interim/*.csv
+data/processed/*.csv
+
+# Model files
+models/trained_models/*.pkl
+*.h5
+
+# Environment
+.env
+__pycache__/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+logs/
+*.log

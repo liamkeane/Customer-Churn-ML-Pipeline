@@ -1,0 +1,77 @@
+services:
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: churn_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: churn_analytics
+      MYSQL_USER: airflow_user
+      MYSQL_PASSWORD: airflow_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./sql:/docker-entrypoint-initdb.d
+    networks:
+      - churn_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 10s
+      retries: 5
+      interval: 30s
+
+  # Jupyter Lab for development and analysis
+  jupyter:
+    build:
+      context: .
+      dockerfile: ./docker/jupyter/Dockerfile
+    container_name: churn_jupyter
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+      JUPYTER_TOKEN: "your-jupyter-token"
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./notebooks:/home/notebooks
+      - ./src:/home/src
+      - ./data:/home/data
+      - ./models:/home/models
+      - ./configs:/home/configs
+    depends_on:
+      - mysql
+    networks:
+      - churn_network
+
+  # MLflow for experiment tracking and model management
+  mlflow:
+    build:
+      context: .
+      dockerfile: ./docker/mlflow/Dockerfile
+    container_name: churn_mlflow
+    environment:
+      MLFLOW_BACKEND_STORE_URI: mysql+pymysql://airflow_user:airflow_password@mysql:3306/churn_analytics
+      MLFLOW_DEFAULT_ARTIFACT_ROOT: /mlflow/artifacts
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_artifacts:/mlflow/artifacts
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - churn_network
+    command: >
+      mlflow server
+      --backend-store-uri mysql+pymysql://airflow_user:airflow_password@mysql:3306/churn_analytics
+      --default-artifact-root /mlflow/artifacts
+      --host 0.0.0.0
+      --port 5000
+
+volumes:
+  mysql_data:
+  mlflow_artifacts:
+
+networks:
+  churn_network:
+    driver: bridge
