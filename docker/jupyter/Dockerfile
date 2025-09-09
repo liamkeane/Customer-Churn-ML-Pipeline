@@ -1,13 +1,17 @@
-FROM jupyter/base-notebook:latest
+FROM jupyter/datascience-notebook:latest
 
 USER root
 
-# Install any necessary packages
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
-    python3-pip \
-    && pip3 install --no-cache-dir \
-    apache-airflow-providers-cncf-kubernetes \
-    apache-airflow-providers-docker \
-    apache-airflow-providers-sqlite
+    mysql-client \
+    && rm -rf /var/lib/apt/lists/*
 
-USER Petyr_Baelish
+USER $NB_UID
+
+# Install additional Python packages
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+# Create directories
+RUN mkdir -p /home/jovyan/work/utils
