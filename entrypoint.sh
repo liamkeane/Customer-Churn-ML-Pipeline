@@ -5,12 +5,12 @@ airflow db init
 
 echo "Creating admin user..."
 airflow users create \
-    --username admin \
-    --firstname bob \
-    --lastname sneid \
+    --username "${AIRFLOW_ADMIN_USERNAME:-admin}" \
+    --firstname "${AIRFLOW_ADMIN_FIRSTNAME:-Petyr}" \
+    --lastname "${AIRFLOW_ADMIN_LASTNAME:-Baelish}" \
     --role Admin \
-    --email admin@example.com \
-    --password admin
+    --email "${AIRFLOW_ADMIN_EMAIL:-little_finger@example.com}" \
+    --password "${AIRFLOW_ADMIN_PASSWORD:-admin}"
 
 echo "Starting $1..."
 exec airflow "$1"
