@@ -1,5 +1,5 @@
 services:
-  # MySQL Database
+  # MySQL database for telco db
   mysql:
     image: mysql:8.0
     container_name: mysql
@@ -10,18 +10,18 @@ services:
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
-      - "3307:3306"   # Expose MySQL on port 3307 to avoid conflict w current local database
+      - "3307:3306"
     volumes:
-      - mysql_data:/var/lib/mysql   # reminder that mysql_data location is chosen by docker (not local to this project)
-      - ./sql/schema.sql:/docker-entrypoint-initdb.d/schema.sql  # Initialize telco DB with schema
+      - mysql_data:/var/lib/mysql
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/schema.sql
     networks:
       - telco_network
 
-
-  # Container for Airflow's metadata db
+  # Postgres database for Airflow metadata
   postgres:
     container_name: postgres
     image: postgres:13
+    restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -29,14 +29,14 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "airflow"]
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}"]
       interval: 5s
       retries: 5
     networks:
-    - telco_network
+      - telco_network
 
-  # Container for Airflow's webserver
-  webserver:
+  # Airflow webserver
+  airflow-webserver:
     container_name: airflow-webserver
     build:
       context: .
@@ -46,21 +46,22 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__WEBSERVER__SECRET_KEY=mysecretkey
-      - AIRFLOW__CORE__FERNET_KEY=GgyJ5jUehSy2zQqY958eUWW1ezEgNp4OerBy-AKuD14=
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
     volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
     ports:
       - "8080:8080"
-    command: webserver
+    command: ["webserver"]
     networks:
       - telco_network
 
-  # Container for Airflow's scheduler
-  scheduler:
+  # Airflow scheduler
+  airflow-scheduler:
     container_name: airflow-scheduler
     build:
       context: .
@@ -70,14 +71,15 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
-      - AIRFLOW__WEBSERVER__SECRET_KEY=mysecretkey
-      - AIRFLOW__CORE__FERNET_KEY=GgyJ5jUehSy2zQqY958eUWW1ezEgNp4OerBy-AKuD14=
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres/${POSTGRES_DB}
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+      AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
     volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-    command: scheduler
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      - ./airflow/plugins:/opt/airflow/plugins
+    command: ["scheduler"]
     networks:
       - telco_network
 
