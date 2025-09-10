@@ -1,6 +1,17 @@
-FROM apache/airflow:2.5.0
+FROM apache/airflow:2.5.1
 
-RUN pip install \
-    apache-airflow-providers-mysql \
-    mysqlclient \
-    pandas
+# Copy the DAGs directory to the Airflow home directory
+COPY airflow/dags/ /opt/airflow/dags/
+
+# Copy the entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+
+# Switch to the root user to change permissions
+USER root
+RUN chmod +x /entrypoint.sh
+
+# Switch back to the airflow user
+USER airflow
+
+# Set the entrypoint to the entrypoint script
+ENTRYPOINT ["/entrypoint.sh"]

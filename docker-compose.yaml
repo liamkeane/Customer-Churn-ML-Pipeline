@@ -18,43 +18,68 @@ services:
       - telco_network
 
 
-  # Apache Airflow
-  airflow:
-    image: apache/airflow:latest
-    container_name: airflow-container
+  # Container for Airflow's metadata db
+  postgres:
+    container_name: postgres
+    image: postgres:13
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+    networks:
+    - telco_network
+
+  webserver:
+    container_name: airflow-webserver
+    build:
+      context: .
+      dockerfile: ./docker/airflow/Dockerfile
     restart: always
-    hostname: airflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__WEBSERVER__SECRET_KEY=mysecretkey
+      - AIRFLOW__CORE__FERNET_KEY=GgyJ5jUehSy2zQqY958eUWW1ezEgNp4OerBy-AKuD14=
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
     ports:
       - "8080:8080"
-    environment:
-      # Airflow settings
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      _AIRFLOW_WWW_USER_CREATE: "true"
-      _AIRFLOW_WWW_USER_USERNAME: "admin"
-      _AIRFLOW_WWW_USER_PASSWORD: "admin"
-      _AIRFLOW_WWW_USER_FIRSTNAME: "Admin"
-      _AIRFLOW_WWW_USER_LASTNAME: "User"
-      _AIRFLOW_WWW_USER_EMAIL: "admin@example.com"
-    volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/logs:/opt/airflow/logs
-    command: bash -c "airflow db init && airflow webserver"
+    command: webserver
     networks:
       - telco_network
 
   scheduler:
-    image: apache/airflow:latest
     container_name: airflow-scheduler
+    build:
+      context: .
+      dockerfile: ./docker/airflow/Dockerfile
     restart: always
     depends_on:
-      - airflow
+      postgres:
+        condition: service_healthy
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__WEBSERVER__SECRET_KEY=mysecretkey
+      - AIRFLOW__CORE__FERNET_KEY=GgyJ5jUehSy2zQqY958eUWW1ezEgNp4OerBy-AKuD14=
     volumes:
-      - ./airflow/dags:/opt/airflow/dags
-      - ./airflow/logs:/opt/airflow/logs
-    command: bash -c "airflow db upgrade && airflow scheduler"
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+    command: scheduler
     networks:
       - telco_network
 
+  # https://medium.com/@opcfrance/setting-up-apache-airflow-with-docker-a-comprehensive-guide-with-examples-c041fed1c3f5
 
   # # Jupyter Lab for development and analysis
   # jupyter:
@@ -104,6 +129,7 @@ services:
 
 volumes:
   mysql_data:
+  postgres_data:
   # mlflow_artifacts:
   # jupyter-user-settings:
 
