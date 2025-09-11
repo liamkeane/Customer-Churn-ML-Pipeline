@@ -1,0 +1,5 @@
+apache-airflow-providers-mysql
+pandas
+numpy
+mysqlclient
+apache-airflow-task-sdk
