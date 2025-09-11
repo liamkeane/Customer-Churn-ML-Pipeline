@@ -55,6 +55,15 @@ CONFIG = {
     'batch_size': 1000
 }
 
+def clean_customer_id_col(df: pd.DataFrame) -> pd.DataFrame:
+    # Standardize columns
+    for col in df.columns:
+        df[col] = df[col].strip().lower()
+
+    df = df[df['customer_id'].str.match(r'^\d{4}-[A-Z]{5}$', na=False)]     # must match this *exact* pattern
+    df = df.drop_duplicates(subset=['customer_id'])    # gotta be unique since its our primary key
+    return df
+
 @dag(
     dag_id='telco_etl',
     start_date=datetime(2024, 1, 1),
@@ -111,17 +120,19 @@ def telco_etl():
     
 
     @task
-    def transform_customer_profile_data(df: pd.DataFrame) -> str:
-        """Transform churn data specifically"""
-        
-        # Churn-specific transformations
+    def transform_customer_profile_data(df: pd.DataFrame) -> pd.DataFrame:
+        """Transform customer profile data from churn csv"""
         original_rows = len(df)
 
-        # Standardize tenure field
-        df['Tenure'] = df['Tenure'].str.strip("$").str.replace(' months', '')
+        df = clean_customer_id_col(df)
+
+        # Clean tenure field
+        df['Tenure'] = df['Tenure'].str.strip().str.strip("$").str.replace(' months', '')
         df['tenure_months'] = pd.to_numeric(df['Tenure'], errors='coerce')
-        df = df.dropna(subset=['tenure_months'])
-        df = df[df['customer_id'] != '']
+
+        # Drop null or invalid rows
+        df = df[(df['customer_id'] != '') & (df['Tenure'] != '')]
+        df = df.dropna(subset=['customer_id', 'Tenure'])
         
         # Save cleaned file
         cleaned_path = Path(CONFIG['processed_data_path']) / 'churn_cleaned.csv'
@@ -133,31 +144,31 @@ def telco_etl():
         return df[['customer_id', 'tenure_months']]
 
     @task
-    def transform_demographics_data(extraction_result: Dict[str, Any]) -> str:
+    def transform_demographics_data(df: pd.DataFrame) -> pd.DataFrame:
         """Transform demographics data"""
-        if extraction_result['status'] != 'PASS':
-            raise ValueError(f"Demographics data failed validation: {extraction_result}")
-        
-        df = pd.read_csv(extraction_result['raw_file_path'])
         original_rows = len(df)
+
+        df = clean_customer_id_col(df)
+
+        # Clean Age column
+        df['Age'] = df['Age'].str.strip("$")
+        df['Age'] = pd.to_numeric(df['Age'], errors='coerce')
+
+        # Clean categorical column
+        df = df[df['Gender'].isin(['male', 'female'])]
+
+        # Clean Boolean columns
+        df = df[df['Under 30'].isin(['yes', 'no'])]
+        df = df[df['Senior Citizen'].isin(['yes', 'no'])]
+        df = df[df['Married'].isin(['yes', 'no', 'partnered', 'married'])]
+        df = df[df['Dependents'].isin(['yes', 'no'])]
         
-        # Demographics-specific transformations
-        boolean_cols = ['Senior_Citizen', 'Partner', 'Dependents']
-        for col in boolean_cols:
-            if col in df.columns:
-                df[col.lower()] = df[col].str.lower().isin(['yes', 'y', '1', 'true'])
-        
-        # Clean customer ID
-        if 'customer_id' not in df.columns:
-            id_cols = [col for col in df.columns if 'customer' in col.lower() and 'id' in col.lower()]
-            if id_cols:
-                df['customer_id'] = df[id_cols[0]].str.replace('*', '').str.strip()
-        
-        # Remove invalid rows
-        df = df.dropna(subset=['customer_id'])
+        # Drop null or invalid rows
+        df = df[(df['customer_id'] != '') & (df['Tenure'] != '')]
+        df = df.dropna(subset=['customer_id', 'Tenure'])
         
         cleaned_path = Path(CONFIG['processed_data_path']) / 'demographics_cleaned.csv'
-        df.to_csv(cleaned_path, index=False)
+        df[['customer_id', '']].to_csv(cleaned_path, index=False)
         
         logging.info(f"Demographics data transformed: {len(df)}/{original_rows} rows retained")
         return str(cleaned_path)
