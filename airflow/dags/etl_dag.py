@@ -1,67 +1,53 @@
-from datetime import datetime, timedelta
-from airflow import DAG
+from datetime import datetime
+
+from sqlalchemy import create_engine
 from airflow.decorators import task, dag
-from airflow.operators.python import PythonOperator
 from airflow.providers.mysql.hooks.mysql import MySqlHook
-from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 import pandas as pd
 import logging
-from typing import Dict, List, Any
+from typing import Dict, Any
 from pathlib import Path
 
 # Configuration for all data sources
 DATA_SOURCES = {
-    'churn': {
+    'customer_profile': {
         'file_path': '/opt/airflow/data/interim/telco_churn_dirty.csv',
-        'table': 'customer_churn',
         'primary_key': 'customer_id',
-        'depends_on': ['demographics', 'services']
     },
     'demographics': {
         'file_path': '/opt/airflow/data/interim/customer_demographics_dirty.csv',
-        'table': 'customer_demographics', 
         'primary_key': 'customer_id',
-        'depends_on': []
     },
     'location': {
         'file_path': '/opt/airflow/data/interim/customer_location_dirty.csv',
-        'table': 'customer_location',
         'primary_key': 'customer_id',
-        'depends_on': ['population']
     },
     'population': {
         'file_path': '/opt/airflow/data/interim/area_population_dirty.csv',
-        'table': 'area_population',
         'primary_key': 'area_code',
-        'depends_on': []
     },
     'services': {
         'file_path': '/opt/airflow/data/interim/customer_services_dirty.csv',
-        'table': 'customer_services',
         'primary_key': 'customer_id',
-        'depends_on': []
     },
     'status': {
         'file_path': '/opt/airflow/data/interim/account_status_dirty.csv',
-        'table': 'account_status',
         'primary_key': 'customer_id',
-        'depends_on': ['churn']
     }
 }
 
 CONFIG = {
     'mysql_conn_id': 'mysql_telco_conn',
-    'processed_data_path': '/opt/airflow/data/processed/',
-    'batch_size': 1000
+    'processed_data_path': '/opt/airflow/data/processed/'
 }
 
-def clean_customer_id_col(df: pd.DataFrame) -> pd.DataFrame:
+def clean_Customer_ID_col(df: pd.DataFrame) -> pd.DataFrame:
     # Standardize columns
     for col in df.columns:
         df[col] = df[col].strip().lower()
 
-    df = df[df['customer_id'].str.match(r'^\d{4}-[A-Z]{5}$', na=False)]     # must match this *exact* pattern
-    df = df.drop_duplicates(subset=['customer_id'])    # gotta be unique since its our primary key
+    df = df[df['Customer ID'].str.match(r'^\d{4}-[A-Z]{5}$', na=False)]     # must match this *exact* pattern
+    df = df.drop_duplicates(subset=['Customer ID'])    # gotta be unique since its (almost always) our primary key
     return df
 
 @dag(
@@ -124,23 +110,25 @@ def telco_etl():
         """Transform customer profile data from churn csv"""
         original_rows = len(df)
 
-        df = clean_customer_id_col(df)
+        df = clean_Customer_ID_col(df)
 
         # Clean tenure field
         df['Tenure'] = df['Tenure'].str.strip().str.strip("$").str.replace(' months', '')
-        df['tenure_months'] = pd.to_numeric(df['Tenure'], errors='coerce')
+        df['Tenure'] = pd.to_numeric(df['Tenure'], errors='coerce')
 
         # Drop null or invalid rows
-        df = df[(df['customer_id'] != '') & (df['Tenure'] != '')]
-        df = df.dropna(subset=['customer_id', 'Tenure'])
+        df = df.replace('', pd.NA)
+        df = df.dropna(subset=['Customer ID', 'Tenure'])
+        df['Tenure'] = df['Tenure'].astype(int)
         
         # Save cleaned file
         cleaned_path = Path(CONFIG['processed_data_path']) / 'churn_cleaned.csv'
-        df[['customer_id', 'tenure_months']].to_csv(cleaned_path, index=False)
+        df[['Customer ID', 'Tenure']].to_csv(cleaned_path, index=False)
 
-        logging.info(f"Churn data transformed: {len(df)}/{original_rows} rows retained")
+        logging.info(f"Customer profile data transformed: {len(df)}/{original_rows} rows retained")
 
         # Return data frame
+        df = df.rename(columns={'Customer ID': 'customer_id', 'Tenure': 'tenure_months'})
         return df[['customer_id', 'tenure_months']]
 
     @task
@@ -148,7 +136,7 @@ def telco_etl():
         """Transform demographics data"""
         original_rows = len(df)
 
-        df = clean_customer_id_col(df)
+        df = clean_Customer_ID_col(df)
 
         # Clean Age column
         df['Age'] = df['Age'].str.strip("$")
@@ -157,275 +145,239 @@ def telco_etl():
         # Clean categorical column
         df = df[df['Gender'].isin(['male', 'female'])]
 
-        # Clean Boolean columns
-        df = df[df['Under 30'].isin(['yes', 'no'])]
-        df = df[df['Senior Citizen'].isin(['yes', 'no'])]
-        df = df[df['Married'].isin(['yes', 'no', 'partnered', 'married'])]
-        df = df[df['Dependents'].isin(['yes', 'no'])]
-        
+        # Clean the messy Boolean columns using mapping
+        df['Married'] = df['Married'].map(
+            lambda x: 'yes' if x in {'yes', 'partnered', 'married'} else ('no' if x in {'no', 'single', 'unmarried'} else pd.NA)
+        )
+        df = df[df['Dependents'].map(
+            lambda x: 'yes' if x in {'yes', 'children', 'kids', 'family'} else ('no' if x in {'no', 'false', '0', 'none'} else pd.NA)
+        )]
+
+        df['Number of Dependents'] = pd.to_numeric(df['Number of Dependents'], errors='coerce')
+
         # Drop null or invalid rows
-        df = df[(df['customer_id'] != '') & (df['Tenure'] != '')]
-        df = df.dropna(subset=['customer_id', 'Tenure'])
-        
+        df = df.replace('', pd.NA)
+        df = df.dropna(subset=['Customer ID', 'Gender', 'Age', 'Under 30', 'Senior Citizen', 'Married', 'Dependents', 'Number of Dependents'])
+        df['Age'] = df['Age'].astype(int)
+        df['Number of Dependents'] = df['Number of Dependents'].astype(int)
+
         cleaned_path = Path(CONFIG['processed_data_path']) / 'demographics_cleaned.csv'
-        df[['customer_id', '']].to_csv(cleaned_path, index=False)
-        
+        df[['Customer ID', 'Gender', 'Age', 'Under 30', 'Senior Citizen', 'Married', 'Dependents', 'Number of Dependents']].to_csv(cleaned_path, index=False)
+
         logging.info(f"Demographics data transformed: {len(df)}/{original_rows} rows retained")
-        return str(cleaned_path)
-    
-    @task 
-    def transform_location_data(extraction_result: Dict[str, Any]) -> str:
-        """Transform location data"""
-        if extraction_result['status'] != 'PASS':
-            raise ValueError(f"Location data failed validation: {extraction_result}")
-        
-        df = pd.read_csv(extraction_result['raw_file_path'])
-        original_rows = len(df)
-        
-        # Location-specific transformations
-        # Standardize state abbreviations
-        if 'state' in df.columns:
-            df['state'] = df['state'].str.upper().str.strip()
-        
-        # Clean zip codes
-        if 'zip_code' in df.columns:
-            df['zip_code'] = df['zip_code'].astype(str).str.extract(r'(\d{5})')
-        
-        # Standardize city names
-        if 'city' in df.columns:
-            df['city'] = df['city'].str.title().str.strip()
-        
-        cleaned_path = Path(CONFIG['processed_data_path']) / 'location_cleaned.csv'
-        df.to_csv(cleaned_path, index=False)
-        
-        logging.info(f"Location data transformed: {len(df)}/{original_rows} rows retained")
-        return str(cleaned_path)
-    
+
+        # Return data frame
+        df = df.rename(columns={'Customer ID': 'customer_id', 'Under 30': 'is_under_30', 'Senior Citizen': 'is_senior_citizen', 'Married': 'has_partner', 'Dependents': 'has_dependents', 'Number of Dependents': 'number_of_dependents'})
+        return df[['customer_id', 'Gender', 'Age', 'is_under_30', 'is_senior_citizen', 'has_partner', 'has_dependents', 'number_of_dependents']]
+
     @task
-    def transform_generic_data(source_name: str, extraction_result: Dict[str, Any]) -> str:
-        """Generic transformation for population, services, and status data"""
-        if extraction_result['status'] != 'PASS':
-            raise ValueError(f"{source_name} data failed validation: {extraction_result}")
-        
-        df = pd.read_csv(extraction_result['raw_file_path'])
+    def transform_location_data(df: pd.DataFrame) -> pd.DataFrame:
+        """Transform location data"""
         original_rows = len(df)
+
+        df = clean_Customer_ID_col(df)
+
+        # Clean Zip Code column
+        df['Zip Code'] = df['Zip Code'].str.strip('$').str.replace(',', '')
+        df['Zip Code'] = pd.to_numeric(df['Zip Code'], errors='coerce')
+
+        # Drop null or invalid rows
+        df = df.replace('', pd.NA)
+        df = df.dropna(subset=['Customer ID', 'City', 'Zip Code'])
+        df['Zip Code'] = df['Zip Code'].astype(int)
         
-        # Generic cleaning
-        # Remove rows with all null values
-        df = df.dropna(how='all')
-        
-        # Clean string columns
-        string_cols = df.select_dtypes(include=['object']).columns
-        for col in string_cols:
-            df[col] = df[col].astype(str).str.strip()
-            df[col] = df[col].replace(['NULL', 'null', 'N/A', 'na', ''], pd.NA)
-        
+        # Save cleaned file
+        cleaned_path = Path(CONFIG['processed_data_path']) / 'location_cleaned.csv'
+        df[['Customer ID', 'City', 'Zip Code']].to_csv(cleaned_path, index=False)
+
+        logging.info(f"Location data transformed: {len(df)}/{original_rows} rows retained")
+
+        # Return data frame
+        df = df.rename(columns={'Customer ID': 'customer_id', 'City': 'city', 'Zip Code': 'zip_code'})
+        return df[['customer_id', 'city', 'zip_code']]
+
+    @task
+    def transform_population_data(df: pd.DataFrame) -> pd.DataFrame:
+        """Transform population data"""
+        original_rows = len(df)
+
+        # Standardize columns
+        for col in df.columns:
+            df[col] = df[col].strip().lower()
+        df = df.drop_duplicates(subset=['Zip Code'])    # gotta be unique since its our primary key
+
+        # Clean Zip Code column
+        df['Zip Code'] = df['Zip Code'].str.strip('$').str.replace(',', '')
+        df['Zip Code'] = pd.to_numeric(df['Zip Code'], errors='coerce')
+
+        # Clean Population column
+        df['Population'] = df['Population'].str.strip('$').str.replace(',', '')
+        df['Population'] = pd.to_numeric(df['Population'], errors='coerce')
+
+        # Drop null or invalid rows
+        df = df.replace('', pd.NA)
+        df = df.dropna(subset=['Zip Code', 'Population'])
+        df['Zip Code'] = df['Zip Code'].astype(int)
+        df['Population'] = df['Population'].astype(int)
+
+        # Save cleaned file
+        cleaned_path = Path(CONFIG['processed_data_path']) / 'population_cleaned.csv'
+        df[['Zip Code', 'Population']].to_csv(cleaned_path, index=False)
+
+        logging.info(f"Population data transformed: {len(df)}/{original_rows} rows retained")
+
+        # Return data frame
+        df = df.rename(columns={'Zip Code': 'zip_code', 'Population': 'population'})
+        return df[['zip_code', 'population']]
+
+    @task
+    def transform_services_data(df: pd.DataFrame) -> pd.DataFrame:
+        """Transform services data"""
+        original_rows = len(df)
+        df_fields = ['Customer ID', 'Referred a Friend', 'Number of Referrals', 'Phone Service', 'Multiple Lines', 'Internet Service', 'Internet Type', 'Online Security', 'Online Backup', 'Avg Monthly Long Distance Charges', 'Avg Monthly GB Download', 'Online Security', 'Online Backup', 'Device Protection Plan', 'Premium Tech Support', 'Streaming TV', 'Streaming Movies', 'Streaming Music', 'Unlimited Data']
+
+        df = clean_Customer_ID_col(df)
+
+        # Clean boolean columns
+        df['Phone Service'] = df['Phone Service'].map(lambda x: 'yes' if x in {'yes', 'active', 'enabled'} else ('no' if x in {'no', 'none'} else pd.NA))
+        df['Multiple Lines'] = df['Multiple Lines'].map(lambda x: 'yes' if x in {'yes', 'multiple'} else ('no' if x in {'no', 'none'} else pd.NA))
+        df['Internet Service'] = df['Internet Service'].map(lambda x: 'yes' if x == 'yes' else ('no' if x in {'no', 'none'} else pd.NA))
+        df['Online Security'] = df['Online Security'].map(lambda x: 'yes' if x in {'yes', 'enabled'} else ('no' if x in {'no', 'none'} else pd.NA))
+        df['Online Backup'] = df['Online Backup'].map(lambda x: 'yes' if x in {'yes', 'enabled'} else ('no' if x in {'no', 'none'} else pd.NA))
+
+        # Clean categorial column
+        df['Internet Type'] = df['Internet Type'].map(lambda x: x if x in {'dsl', 'fiber optic'} else ('none' if x == '' else pd.NA))
+
+        # Drop null or invalid rows
+        df = df.replace('', pd.NA)
+        df = df.dropna(subset=[df_fields])
+        df['Number of Referrals'] = df['Number of Referrals'].astype(int)
+        df['Avg Monthly Long Distance Charges'] = df['Avg Monthly Long Distance Charges'].astype(int)
+        df['Avg Monthly GB Download'] = df['Avg Monthly GB Download'].astype(int)
+
+        cleaned_path = Path(CONFIG['processed_data_path']) / 'services_cleaned.csv'
+        df[df_fields].to_csv(cleaned_path, index=False)
+
+        logging.info(f"Services data transformed: {len(df)}/{original_rows} rows retained")
+
+        # Return data frame
+        df = df.rename(columns={'Customer ID': 'customer_id', 'Referred a Friend': 'has_referred_a_friend', 'Number of Referrals': 'number_of_referrals', 'Phone Service': 'has_phone_service', 'Multiple Lines': 'has_multiple_lines', 'Internet Service': 'has_internet_service', 'Internet Type': 'internet_service_type', 'Online Security': 'has_online_security', 'Online Backup': 'has_online_backup', 'Avg Monthly Long Distance Charges': 'avg_monthly_long_distance_charges', 'Avg Monthly GB Download': 'avg_monthly_gb_download', 'Device Protection Plan': 'has_device_protection', 'Premium Tech Support': 'has_tech_support', 'Streaming TV': 'has_tv', 'Streaming Movies': 'has_movies', 'Streaming Music': 'has_music', 'Unlimited Data': 'has_unlimited_data'})
+        return df[['customer_id', 'has_referred_a_friend', 'number_of_referrals', 'has_phone_service', 'has_multiple_lines', 'has_internet_service', 'internet_service_type', 'has_online_security', 'has_online_backup', 'avg_monthly_long_distance_charges', 'avg_monthly_gb_download', 'has_device_protection', 'has_tech_support', 'has_tv', 'has_movies', 'has_music', 'has_unlimited_data']]
+
+    @task
+    def transform_financials_data(df: pd.DataFrame) -> pd.DataFrame:
+        """Transform financials data"""
+        original_rows = len(df)
+
+        df = clean_Customer_ID_col(df)
+
+        # Clean Boolean column
+        df['Paperless Billing'] = df['Paperless Billing'].map(lambda x: 'yes' if x in {'yes', 'electronic', 'digital'} else ('no' if x in {'no', 'paper', 'mail'} else pd.NA))
+
         # Clean numeric columns
-        numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns
+        df['Total Charges'] = df['Total Charges'].str.strip("$").str.replace(',', '')
+        
+        numeric_cols = ['Monthly Charge', 'Total Charges', 'Total Refunds', 'Total Extra Data Charges', 'Total Long Distance Charges', 'Total Revenue']
         for col in numeric_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        # Drop null or invalid rows
+        df = df.replace('', pd.NA)
+        df = df.dropna(subset=['Customer ID', 'Contract', 'Paperless Billing', 'Payment Method'] + numeric_cols)
         
-        cleaned_path = Path(CONFIG['processed_data_path']) / f'{source_name}_cleaned.csv'
-        df.to_csv(cleaned_path, index=False)
-        
-        logging.info(f"{source_name} data transformed: {len(df)}/{original_rows} rows retained")
-        return str(cleaned_path)
-    
+        for col in numeric_cols:
+            df[col] = df[col].astype(float)
+
+        cleaned_path = Path(CONFIG['processed_data_path']) / 'financials_cleaned.csv'
+        df[['Customer ID', 'Contract', 'Paperless Billing', 'Payment Method'] + numeric_cols].to_csv(cleaned_path, index=False)
+
+        logging.info(f"Financials data transformed: {len(df)}/{original_rows} rows retained")
+
+        # Return data frame
+        df = df.rename(columns={'Customer ID': 'customer_id', 'Contract': 'contract_type', 'Paperless Billing': 'has_paperless_billing', 'Payment Method': 'payment_method', 'Monthly Charge': 'monthly_charges', 'Total Charges': 'total_charges', 'Total Refunds': 'total_refunds', 'Total Extra Data Charges': 'total_extra_data_charges', 'Total Long Distance Charges': 'total_long_distance_charges', 'Total Revenue': 'total_revenue'})
+        return df[['customer_id', 'contract_type', 'has_paperless_billing', 'payment_method', 'monthly_charges', 'total_charges', 'total_refunds', 'total_extra_data_charges', 'total_long_distance_charges', 'total_revenue']]
+
     @task
-    def load_to_database(source_name: str, cleaned_file_path: str) -> Dict[str, Any]:
+    def transform_status_data(df: pd.DataFrame) -> pd.DataFrame:
+        """Transform account status data"""
+        original_rows = len(df)
+
+        df = clean_Customer_ID_col(df)
+
+        # Clean numerical columns
+        num_cols = ['CLTV', 'Satisfaction Score', 'Churn Score']
+        for col in num_cols:
+            df[col] = df[col].str.strip('$').str.replace(',', '')
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
+        # Clean categorial column
+        df['Churn Category'] = df['Churn Category'].map(lambda x: x if x in {'competitor', 'dissatisfaction', 'attitude', 'price', 'other'} else ('not_specified' if x == '' else pd.NA))
+
+        # Drop null or invalid rows
+        df = df.replace('', pd.NA)
+        df = df.dropna(subset=['Customer ID', 'Satisfaction Score', 'Churn Label', 'Churn Score', 'CLTV', 'Churn Category'])
+        
+        cleaned_path = Path(CONFIG['processed_data_path']) / 'status_cleaned.csv'
+        df[['Customer ID', 'Satisfaction Score', 'Churn Label', 'Churn Score', 'CLTV', 'Churn Category']].to_csv(cleaned_path, index=False)
+
+        logging.info(f"Status data transformed: {len(df)}/{original_rows} rows retained")
+
+        # Return data frame
+        df = df.rename(columns={'Customer ID': 'customer_id', 'Satisfaction Score': 'satisfaction_score', 'Churn Label': 'churn_label', 'Churn Score': 'churn_score', 'CLTV': 'cltv', 'Churn Category': 'churn_category'})
+        return df[['customer_id', 'satisfaction_score', 'churn_label', 'churn_score', 'cltv', 'churn_category']]
+
+    @task
+    def load_to_database(table_name: str, df: pd.DataFrame):
         """Load cleaned data to MySQL database"""
-        config = DATA_SOURCES[source_name]
-        table_name = config['table']
-        
-        df = pd.read_csv(cleaned_file_path)
-        mysql_hook = MySqlHook(mysql_conn_id=CONFIG['mysql_conn_id'])
-        
-        try:
-            # Batch insert
-            batch_size = CONFIG['batch_size']
-            total_inserted = 0
-            
-            for i in range(0, len(df), batch_size):
-                batch_df = df.iloc[i:i+batch_size]
-                
-                # Convert to records
-                records = []
-                for _, row in batch_df.iterrows():
-                    record = tuple(row[col] if pd.notna(row[col]) else None for col in batch_df.columns)
-                    records.append(record)
-                
-                # Insert batch
-                mysql_hook.insert_rows(
-                    table=table_name,
-                    rows=records,
-                    target_fields=list(batch_df.columns),
-                    replace=True  # Use REPLACE for upsert behavior
-                )
-                
-                total_inserted += len(records)
-                logging.info(f"{source_name}: Inserted batch {i//batch_size + 1} ({len(records)} records)")
-            
-            result = {
-                'source': source_name,
-                'table': table_name,
-                'records_loaded': total_inserted,
-                'status': 'SUCCESS'
-            }
-            
-            logging.info(f"Successfully loaded {total_inserted} {source_name} records")
-            return result
-            
-        except Exception as e:
-            logging.error(f"Failed to load {source_name} data: {str(e)}")
-            return {
-                'source': source_name,
-                'table': table_name,
-                'status': 'FAILED',
-                'error': str(e)
-            }
+
+        hook = MySqlHook(mysql_conn_id=CONFIG['mysql_conn_id'])
+        cnx = hook.get_conn()
+        engine = create_engine(hook.get_uri(), creator=lambda: cnx)
+       
+        df.to_sql(name=table_name, con=engine, if_exists='replace', index=False)
+
+        engine.dispose()
+
+        logging.info(f"Successfully loaded {len(df)} {table_name} records")
     
-    @task
-    def validate_referential_integrity() -> Dict[str, Any]:
-        """Validate foreign key relationships across tables"""
-        mysql_hook = MySqlHook(mysql_conn_id=CONFIG['mysql_conn_id'])
-        integrity_issues = {}
-        
-        # Define expected relationships
-        relationships = [
-            ('customer_churn', 'customer_id', 'customer_demographics', 'customer_id'),
-            ('customer_churn', 'customer_id', 'customer_services', 'customer_id'),
-            ('customer_location', 'customer_id', 'customer_demographics', 'customer_id'),
-            ('customer_location', 'area_code', 'area_population', 'area_code')
-        ]
-        
-        for parent_table, parent_key, child_table, child_key in relationships:
-            try:
-                # Check for orphaned records
-                orphan_query = f"""
-                SELECT COUNT(*) as orphan_count
-                FROM {child_table} c
-                LEFT JOIN {parent_table} p ON c.{child_key} = p.{parent_key}
-                WHERE p.{parent_key} IS NULL AND c.{child_key} IS NOT NULL
-                """
-                
-                result = mysql_hook.get_first(orphan_query)
-                orphan_count = result[0] if result else 0
-                
-                integrity_issues[f"{child_table}_{child_key}"] = {
-                    'parent_table': parent_table,
-                    'orphan_count': orphan_count,
-                    'status': 'PASS' if orphan_count == 0 else 'WARN'
-                }
-                
-            except Exception as e:
-                integrity_issues[f"{child_table}_{child_key}"] = {
-                    'status': 'ERROR',
-                    'error': str(e)
-                }
-        
-        overall_status = 'PASS'
-        if any(issue['status'] == 'ERROR' for issue in integrity_issues.values()):
-            overall_status = 'FAIL'
-        elif any(issue['status'] == 'WARN' for issue in integrity_issues.values()):
-            overall_status = 'WARN'
-        
-        return {
-            'overall_status': overall_status,
-            'integrity_issues': integrity_issues,
-            'validation_timestamp': datetime.now().isoformat()
-        }
-    
-    @task
-    def generate_pipeline_summary(load_results: List[Dict], integrity_result: Dict) -> str:
-        """Generate comprehensive pipeline execution summary"""
-        
-        total_records = sum(result.get('records_loaded', 0) for result in load_results)
-        successful_loads = sum(1 for result in load_results if result.get('status') == 'SUCCESS')
-        failed_loads = len(load_results) - successful_loads
-        
-        summary = f"""
-        Multi-Source ETL Pipeline Summary
-        ================================
-        
-        OVERALL STATUS: {'SUCCESS' if failed_loads == 0 else 'PARTIAL SUCCESS' if successful_loads > 0 else 'FAILED'}
-        
-        DATA SOURCES PROCESSED: {len(DATA_SOURCES)}
-        • Successful Loads: {successful_loads}
-        • Failed Loads: {failed_loads}
-        • Total Records Loaded: {total_records:,}
-        
-        LOAD RESULTS BY SOURCE:
-        """
-        
-        for result in load_results:
-            status_icon = "✓" if result.get('status') == 'SUCCESS' else "✗"
-            records = result.get('records_loaded', 0)
-            summary += f"\n  {status_icon} {result.get('source', 'Unknown')}: {records:,} records"
-        
-        summary += f"""
-        
-        REFERENTIAL INTEGRITY: {integrity_result.get('overall_status', 'UNKNOWN')}
-        """
-        
-        for key, issue in integrity_result.get('integrity_issues', {}).items():
-            if issue.get('orphan_count', 0) > 0:
-                summary += f"\n  ⚠ {key}: {issue['orphan_count']} orphaned records"
-        
-        summary += f"""
-        
-        Pipeline completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-        """
-        
-        # Save summary
-        summary_path = Path(CONFIG['processed_data_path']) / f"pipeline_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        summary_path.write_text(summary)
-        
-        logging.info("Pipeline summary generated")
-        return summary
-    
-    
-    # Extract all sources
+    # Extract all sources into dataframes
     extracted_dataframes = {}
     for source in DATA_SOURCES.keys():
         extracted_dataframes[source] = extract_and_validate_source(source)
     
-    # Transform based on dependencies and source type
+    # Transform dataframes (dependency is implicit here since we are using the output of one task as input to another)
     transformed_dataframes = {}
 
-    transformed_dataframes['churn'] = transform_customer_profile_data(extracted_dataframes['churn'])
+    transformed_dataframes['customer_profile'] = transform_customer_profile_data(extracted_dataframes['customer_profile'])
+    # transformed_dataframes['demographics'] = transform_demographics_data(extracted_dataframes['demographics'])
 
-    # Demographics and population have no dependencies
-    transformed_dataframes['demographics'] = transform_demographics_data(extracted_dataframes['demographics'])
-    transformed_dataframes['population'] = transform_generic_data('population', extracted_dataframes['population'])
-    
-    # Services can run after demographics
-    transformed_dataframes['services'] = transform_generic_data('services', extracted_dataframes['services'])
-    
-    # Location depends on population  
-    transformed_dataframes['location'] = transform_location_data(extracted_dataframes['location'])
-    transformed_dataframes['location'] >> transformed_dataframes['population']  # dependency
-    
-    # Churn depends on demographics and services
-    
-    [transformed_dataframes['demographics'], transformed_dataframes['services']] >> transformed_dataframes['churn']
-    
-    # Status depends on churn
-    transformed_dataframes['status'] = transform_generic_data('status', extracted_dataframes['status'])
-    transformed_dataframes['churn'] >> transformed_dataframes['status']
-    
-    # Load all sources
-    load_results = []
-    for source in DATA_SOURCES.keys():
-        load_task = load_to_database(source, transformed_dataframes[source])
-        load_results.append(load_task)
-    
-    # Final validation and summary
-    integrity_check = validate_referential_integrity()
-    load_results >> integrity_check
-    
-    pipeline_summary = generate_pipeline_summary(load_results, integrity_check)
-    
-    return pipeline_summary
+    # transformed_dataframes['location'] = transform_location_data(extracted_dataframes['location'])
+    # transformed_dataframes['population'] = transform_population_data(extracted_dataframes['population'])
+
+    # transformed_dataframes['services'] = transform_services_data(extracted_dataframes['services'])
+    # transformed_dataframes['financials'] = transform_financials_data(extracted_dataframes['services'])
+
+    # transformed_dataframes['status'] = transform_status_data(extracted_dataframes['status'])
+
+    # # Load dataframes into database
+    # load_customer_profile = load_to_database('customer_profile', Path(CONFIG['processed_data_path']) / 'churn_cleaned.csv')     # everything is dependent on customer profile data
+
+    # # Load population and location with explicit dependency
+    # load_population = load_to_database('population', transformed_dataframes['population'])
+    # load_location = load_to_database('location', transformed_dataframes['location'])
+    # load_population >> load_location
+
+    # # Load remaining sources while keeping dependencies in mind
+    # load_tasks = []
+    # for name, df in transformed_dataframes.items():
+    #     if name not in ['customer_profile', 'population', 'location']:
+    #         load_task = load_to_database(name, df)
+    #         load_tasks.append(load_task)
+    #         # customer_profile must load before all other tables
+    #         load_customer_profile >> load_task
+
+    # load_customer_profile >> load_population
+    # load_customer_profile >> load_location
 
 # Instantiate the DAG
-dag_instance = telco_etl()
+telco_etl()

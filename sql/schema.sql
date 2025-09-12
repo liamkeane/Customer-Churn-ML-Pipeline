@@ -1,14 +1,16 @@
 -- MySQL schema for telco customer churn dataset
-create database if not exists telco_churn;
-use telco_churn;
+create database if not exists telco;
+use telco;
 
 -- drop tables if exists (for development)
-drop table if exists customer_profile;
+
 drop table if exists demographics;
 drop table if exists `location`;
 drop table if exists `population`;
 drop table if exists services;
 drop table if exists financials;
+drop table if exists status;
+drop table if exists customer_profile;
 
 -- main customer churn table
 create table customer_profile (
@@ -21,7 +23,7 @@ create table demographics (
     customer_id varchar(20) not null primary key unique,
 
     -- demographic info
-    gender enum('Male', 'Female', 'Other') not null,
+    gender enum('male', 'female', 'other') not null,
     age int unsigned not null,
     is_under_30 boolean not null,
     is_senior_citizen boolean not null,
@@ -32,27 +34,24 @@ create table demographics (
     foreign key (customer_id) references customer_profile(customer_id)
 );
 
--- location table
-create table location (
-    customer_id varchar(20) not null primary key unique,
-
-    -- location info
-    country varchar(100) not null,
-    `state` varchar(100) not null,
-    city varchar(100) not null,
-    zip_code char(10) not null,
-
-    foreign key (customer_id) references customer_profile(customer_id)
-);
-
 -- population table
 create table population (
     zip_code char(10) not null primary key unique,
 
     -- population info
-    population int unsigned not null,
+    population int unsigned not null
+);
 
-    foreign key (zip_code) references location(zip_code)
+-- location table
+create table location (
+    customer_id varchar(20) not null primary key unique,
+
+    -- location info
+    city varchar(100) not null,
+    zip_code char(10) not null,
+
+    foreign key (customer_id) references customer_profile(customer_id),
+    foreign key (zip_code) references population(zip_code)
 );
 
 -- services table
@@ -68,7 +67,7 @@ create table services (
 
     -- internet service
     has_internet_service boolean not null,
-    internet_service_type enum('None', 'DSL', 'Fiber optic') not null,
+    internet_service_type enum('none', 'dsl', 'fiber optic') not null,
     avg_monthly_gb_download decimal(10,2) not null check (avg_monthly_gb_download >= 0),
 
     -- internet addons
@@ -89,12 +88,12 @@ create table financials (
     customer_id varchar(20) not null primary key unique,
     
     -- account info
-    contract_type enum('Month-to-month', 'One year', 'Two year') not null,
+    contract_type enum('month-to-month', 'one year', 'two year') not null,
     has_paperless_billing boolean not null,
     payment_method enum(
-        'Bank Withdrawal',
-        'Credit Card',
-        'Mailed Check'
+        'bank withdrawal',
+        'credit card',
+        'mailed check'
     ) not null,
     
     -- financials
@@ -116,12 +115,12 @@ create table status (
     churn_score int not null check (churn_score >= 0 and churn_score <= 100),
     cltv int not null check (cltv >= 0),
     churn_category enum(
-        '',
-        'Competitor',
-        'Dissatisfaction',
-        'Attitude',
-        'Price',
-        'Other'
+        'not_specified',
+        'competitor',
+        'dissatisfaction',
+        'attitude',
+        'price',
+        'other'
     ) not null,
     
     foreign key (customer_id) references customer_profile(customer_id)
