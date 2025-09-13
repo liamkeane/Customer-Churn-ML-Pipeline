@@ -11,27 +11,27 @@ from pathlib import Path
 # Configuration for all data sources
 DATA_SOURCES = {
     'customer_profile': {
-        'file_path': '/opt/airflow/data/interim/telco_churn_dirty.csv',
+        'file_path': '/opt/airflow/data/interim/churn_dirty.csv',
         'primary_key': 'customer_id',
     },
     'demographics': {
-        'file_path': '/opt/airflow/data/interim/customer_demographics_dirty.csv',
+        'file_path': '/opt/airflow/data/interim/demographics_dirty.csv',
         'primary_key': 'customer_id',
     },
     'location': {
-        'file_path': '/opt/airflow/data/interim/customer_location_dirty.csv',
+        'file_path': '/opt/airflow/data/interim/location_dirty.csv',
         'primary_key': 'customer_id',
     },
     'population': {
-        'file_path': '/opt/airflow/data/interim/area_population_dirty.csv',
+        'file_path': '/opt/airflow/data/interim/population_dirty.csv',
         'primary_key': 'area_code',
     },
     'services': {
-        'file_path': '/opt/airflow/data/interim/customer_services_dirty.csv',
+        'file_path': '/opt/airflow/data/interim/services_dirty.csv',
         'primary_key': 'customer_id',
     },
     'status': {
-        'file_path': '/opt/airflow/data/interim/account_status_dirty.csv',
+        'file_path': '/opt/airflow/data/interim/status_dirty.csv',
         'primary_key': 'customer_id',
     }
 }
@@ -50,6 +50,7 @@ def clean_Customer_ID_col(df: pd.DataFrame) -> pd.DataFrame:
     df = df.drop_duplicates(subset=['Customer ID'])    # gotta be unique since its (almost always) our primary key
     return df
 
+
 @dag(
     dag_id='telco_etl',
     start_date=datetime(2024, 1, 1),
@@ -65,7 +66,7 @@ def telco_etl():
     Processes: churn, demographics, location, population, services, status
     """
     @task
-    def extract_and_validate_source(source_name: str) -> Dict[str, Any]:
+    def validate_source(source_name: str):
         """Extract and validate a single data source"""
         config = DATA_SOURCES[source_name]
         logging.info(f"Extracting {source_name} from {config['file_path']}")
@@ -101,13 +102,12 @@ def telco_etl():
         
         # Log validation results (for later comparison)
         logging.info(f"{validation_result}")
-
-        return df
     
 
     @task
-    def transform_customer_profile_data(df: pd.DataFrame) -> pd.DataFrame:
+    def transform_customer_profile_data(file_path: str) -> str:
         """Transform customer profile data from churn csv"""
+        df = pd.read_csv(file_path)
         original_rows = len(df)
 
         df = clean_Customer_ID_col(df)
@@ -120,20 +120,19 @@ def telco_etl():
         df = df.replace('', pd.NA)
         df = df.dropna(subset=['Customer ID', 'Tenure'])
         df['Tenure'] = df['Tenure'].astype(int)
-        
-        # Save cleaned file
-        cleaned_path = Path(CONFIG['processed_data_path']) / 'churn_cleaned.csv'
-        df[['Customer ID', 'Tenure']].to_csv(cleaned_path, index=False)
 
         logging.info(f"Customer profile data transformed: {len(df)}/{original_rows} rows retained")
 
-        # Return data frame
+        # Save cleaned file
         df = df.rename(columns={'Customer ID': 'customer_id', 'Tenure': 'tenure_months'})
-        return df[['customer_id', 'tenure_months']]
+        cleaned_path = Path(CONFIG['processed_data_path']) / 'churn_cleaned.csv'
+        df[['customer_id', 'tenure_months']].to_csv(cleaned_path, index=False)
+
 
     @task
-    def transform_demographics_data(df: pd.DataFrame) -> pd.DataFrame:
+    def transform_demographics_data(file_path: str) -> str:
         """Transform demographics data"""
+        df = pd.read_csv(file_path)
         original_rows = len(df)
 
         df = clean_Customer_ID_col(df)
@@ -161,18 +160,17 @@ def telco_etl():
         df['Age'] = df['Age'].astype(int)
         df['Number of Dependents'] = df['Number of Dependents'].astype(int)
 
-        cleaned_path = Path(CONFIG['processed_data_path']) / 'demographics_cleaned.csv'
-        df[['Customer ID', 'Gender', 'Age', 'Under 30', 'Senior Citizen', 'Married', 'Dependents', 'Number of Dependents']].to_csv(cleaned_path, index=False)
-
         logging.info(f"Demographics data transformed: {len(df)}/{original_rows} rows retained")
-
-        # Return data frame
+        
         df = df.rename(columns={'Customer ID': 'customer_id', 'Under 30': 'is_under_30', 'Senior Citizen': 'is_senior_citizen', 'Married': 'has_partner', 'Dependents': 'has_dependents', 'Number of Dependents': 'number_of_dependents'})
-        return df[['customer_id', 'Gender', 'Age', 'is_under_30', 'is_senior_citizen', 'has_partner', 'has_dependents', 'number_of_dependents']]
+        cleaned_path = Path(CONFIG['processed_data_path']) / 'demographics_cleaned.csv'
+        df[['customer_id', 'gender', 'age', 'is_under_30', 'is_senior_citizen', 'has_partner', 'has_dependents', 'number_of_dependents']].to_csv(cleaned_path, index=False)
+
 
     @task
-    def transform_location_data(df: pd.DataFrame) -> pd.DataFrame:
+    def transform_location_data(file_path: str) -> str:
         """Transform location data"""
+        df = pd.read_csv(file_path)
         original_rows = len(df)
 
         df = clean_Customer_ID_col(df)
@@ -185,20 +183,19 @@ def telco_etl():
         df = df.replace('', pd.NA)
         df = df.dropna(subset=['Customer ID', 'City', 'Zip Code'])
         df['Zip Code'] = df['Zip Code'].astype(int)
-        
-        # Save cleaned file
-        cleaned_path = Path(CONFIG['processed_data_path']) / 'location_cleaned.csv'
-        df[['Customer ID', 'City', 'Zip Code']].to_csv(cleaned_path, index=False)
 
         logging.info(f"Location data transformed: {len(df)}/{original_rows} rows retained")
 
-        # Return data frame
+        # Save cleaned file
         df = df.rename(columns={'Customer ID': 'customer_id', 'City': 'city', 'Zip Code': 'zip_code'})
-        return df[['customer_id', 'city', 'zip_code']]
+        cleaned_path = Path(CONFIG['processed_data_path']) / 'location_cleaned.csv'
+        df[['Customer ID', 'City', 'Zip Code']].to_csv(cleaned_path, index=False)
+
 
     @task
-    def transform_population_data(df: pd.DataFrame) -> pd.DataFrame:
+    def transform_population_data(file_path: str) -> str:
         """Transform population data"""
+        df = pd.read_csv(file_path)
         original_rows = len(df)
 
         # Standardize columns
@@ -220,19 +217,17 @@ def telco_etl():
         df['Zip Code'] = df['Zip Code'].astype(int)
         df['Population'] = df['Population'].astype(int)
 
-        # Save cleaned file
-        cleaned_path = Path(CONFIG['processed_data_path']) / 'population_cleaned.csv'
-        df[['Zip Code', 'Population']].to_csv(cleaned_path, index=False)
-
         logging.info(f"Population data transformed: {len(df)}/{original_rows} rows retained")
 
-        # Return data frame
+        # Save cleaned file
         df = df.rename(columns={'Zip Code': 'zip_code', 'Population': 'population'})
-        return df[['zip_code', 'population']]
+        cleaned_path = Path(CONFIG['processed_data_path']) / 'population_cleaned.csv'
+        df[['zip_code', 'population']].to_csv(cleaned_path, index=False)
 
     @task
-    def transform_services_data(df: pd.DataFrame) -> pd.DataFrame:
+    def transform_services_data(file_path: str) -> str:
         """Transform services data"""
+        df = pd.read_csv(file_path)
         original_rows = len(df)
         df_fields = ['Customer ID', 'Referred a Friend', 'Number of Referrals', 'Phone Service', 'Multiple Lines', 'Internet Service', 'Internet Type', 'Online Security', 'Online Backup', 'Avg Monthly Long Distance Charges', 'Avg Monthly GB Download', 'Online Security', 'Online Backup', 'Device Protection Plan', 'Premium Tech Support', 'Streaming TV', 'Streaming Movies', 'Streaming Music', 'Unlimited Data']
 
@@ -255,18 +250,18 @@ def telco_etl():
         df['Avg Monthly Long Distance Charges'] = df['Avg Monthly Long Distance Charges'].astype(int)
         df['Avg Monthly GB Download'] = df['Avg Monthly GB Download'].astype(int)
 
-        cleaned_path = Path(CONFIG['processed_data_path']) / 'services_cleaned.csv'
-        df[df_fields].to_csv(cleaned_path, index=False)
-
         logging.info(f"Services data transformed: {len(df)}/{original_rows} rows retained")
 
-        # Return data frame
+        # Save cleaned file
         df = df.rename(columns={'Customer ID': 'customer_id', 'Referred a Friend': 'has_referred_a_friend', 'Number of Referrals': 'number_of_referrals', 'Phone Service': 'has_phone_service', 'Multiple Lines': 'has_multiple_lines', 'Internet Service': 'has_internet_service', 'Internet Type': 'internet_service_type', 'Online Security': 'has_online_security', 'Online Backup': 'has_online_backup', 'Avg Monthly Long Distance Charges': 'avg_monthly_long_distance_charges', 'Avg Monthly GB Download': 'avg_monthly_gb_download', 'Device Protection Plan': 'has_device_protection', 'Premium Tech Support': 'has_tech_support', 'Streaming TV': 'has_tv', 'Streaming Movies': 'has_movies', 'Streaming Music': 'has_music', 'Unlimited Data': 'has_unlimited_data'})
-        return df[['customer_id', 'has_referred_a_friend', 'number_of_referrals', 'has_phone_service', 'has_multiple_lines', 'has_internet_service', 'internet_service_type', 'has_online_security', 'has_online_backup', 'avg_monthly_long_distance_charges', 'avg_monthly_gb_download', 'has_device_protection', 'has_tech_support', 'has_tv', 'has_movies', 'has_music', 'has_unlimited_data']]
+        cleaned_path = Path(CONFIG['processed_data_path']) / 'services_cleaned.csv'
+        df[['customer_id', 'has_referred_a_friend', 'number_of_referrals', 'has_phone_service', 'has_multiple_lines', 'has_internet_service', 'internet_service_type', 'has_online_security', 'has_online_backup', 'avg_monthly_long_distance_charges', 'avg_monthly_gb_download', 'has_device_protection', 'has_tech_support', 'has_tv', 'has_movies', 'has_music', 'has_unlimited_data']].to_csv(cleaned_path, index=False)
+
 
     @task
-    def transform_financials_data(df: pd.DataFrame) -> pd.DataFrame:
+    def transform_financials_data(file_path: str) -> str:
         """Transform financials data"""
+        df = pd.read_csv(file_path)
         original_rows = len(df)
 
         df = clean_Customer_ID_col(df)
@@ -288,18 +283,19 @@ def telco_etl():
         for col in numeric_cols:
             df[col] = df[col].astype(float)
 
-        cleaned_path = Path(CONFIG['processed_data_path']) / 'financials_cleaned.csv'
-        df[['Customer ID', 'Contract', 'Paperless Billing', 'Payment Method'] + numeric_cols].to_csv(cleaned_path, index=False)
 
         logging.info(f"Financials data transformed: {len(df)}/{original_rows} rows retained")
 
         # Return data frame
         df = df.rename(columns={'Customer ID': 'customer_id', 'Contract': 'contract_type', 'Paperless Billing': 'has_paperless_billing', 'Payment Method': 'payment_method', 'Monthly Charge': 'monthly_charges', 'Total Charges': 'total_charges', 'Total Refunds': 'total_refunds', 'Total Extra Data Charges': 'total_extra_data_charges', 'Total Long Distance Charges': 'total_long_distance_charges', 'Total Revenue': 'total_revenue'})
-        return df[['customer_id', 'contract_type', 'has_paperless_billing', 'payment_method', 'monthly_charges', 'total_charges', 'total_refunds', 'total_extra_data_charges', 'total_long_distance_charges', 'total_revenue']]
+        cleaned_path = Path(CONFIG['processed_data_path']) / 'financials_cleaned.csv'
+        df[['customer_id', 'contract_type', 'has_paperless_billing', 'payment_method', 'monthly_charges', 'total_charges', 'total_refunds', 'total_extra_data_charges', 'total_long_distance_charges', 'total_revenue']].to_csv(cleaned_path, index=False)
+
 
     @task
-    def transform_status_data(df: pd.DataFrame) -> pd.DataFrame:
+    def transform_status_data(file_path: str) -> str:
         """Transform account status data"""
+        df = pd.read_csv(file_path)
         original_rows = len(df)
 
         df = clean_Customer_ID_col(df)
@@ -316,15 +312,14 @@ def telco_etl():
         # Drop null or invalid rows
         df = df.replace('', pd.NA)
         df = df.dropna(subset=['Customer ID', 'Satisfaction Score', 'Churn Label', 'Churn Score', 'CLTV', 'Churn Category'])
-        
-        cleaned_path = Path(CONFIG['processed_data_path']) / 'status_cleaned.csv'
-        df[['Customer ID', 'Satisfaction Score', 'Churn Label', 'Churn Score', 'CLTV', 'Churn Category']].to_csv(cleaned_path, index=False)
 
         logging.info(f"Status data transformed: {len(df)}/{original_rows} rows retained")
 
         # Return data frame
         df = df.rename(columns={'Customer ID': 'customer_id', 'Satisfaction Score': 'satisfaction_score', 'Churn Label': 'churn_label', 'Churn Score': 'churn_score', 'CLTV': 'cltv', 'Churn Category': 'churn_category'})
-        return df[['customer_id', 'satisfaction_score', 'churn_label', 'churn_score', 'cltv', 'churn_category']]
+        cleaned_path = Path(CONFIG['processed_data_path']) / 'status_cleaned.csv'
+        df[['customer_id', 'satisfaction_score', 'churn_label', 'churn_score', 'cltv', 'churn_category']].to_csv(cleaned_path, index=False)
+
 
     @task
     def load_to_database(table_name: str, df: pd.DataFrame):
@@ -343,12 +338,12 @@ def telco_etl():
     # Extract all sources into dataframes
     extracted_dataframes = {}
     for source in DATA_SOURCES.keys():
-        extracted_dataframes[source] = extract_and_validate_source(source)
+        validate_source(source)
     
     # Transform dataframes (dependency is implicit here since we are using the output of one task as input to another)
     transformed_dataframes = {}
 
-    transformed_dataframes['customer_profile'] = transform_customer_profile_data(extracted_dataframes['customer_profile'])
+    # transformed_dataframes['customer_profile'] = transform_customer_profile_data(extracted_dataframes['customer_profile'])
     # transformed_dataframes['demographics'] = transform_demographics_data(extracted_dataframes['demographics'])
 
     # transformed_dataframes['location'] = transform_location_data(extracted_dataframes['location'])

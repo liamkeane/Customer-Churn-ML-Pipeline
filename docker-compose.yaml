@@ -54,7 +54,8 @@ services:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
-      - ./data:/opt/airflow/data
+      - ./data/interim:/opt/airflow/data/interim
+      - ./data/processed:/opt/airflow/data/processed
     ports:
       - "8080:8080"
     command: ["webserver"]
@@ -80,7 +81,8 @@ services:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/logs:/opt/airflow/logs
       - ./airflow/plugins:/opt/airflow/plugins
-      - ./data:/opt/airflow/data
+      - ./data/interim:/opt/airflow/data/interim
+      - ./data/processed:/opt/airflow/data/processed
     command: ["scheduler"]
     networks:
       - telco_network
