@@ -4,4 +4,4 @@ FROM apache/airflow:2.5.1
 COPY airflow/dags/ /opt/airflow/dags/
 
 # Install dependencies
-RUN pip install --no-cache-dir "apache-airflow==${AIRFLOW_VERSION}" -r docker/airflow/requirements.txt
+RUN pip install apache-airflow-providers-mysql pandas numpy mysqlclient

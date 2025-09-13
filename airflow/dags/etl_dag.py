@@ -5,7 +5,6 @@ from airflow.decorators import task, dag
 from airflow.providers.mysql.hooks.mysql import MySqlHook
 import pandas as pd
 import logging
-from typing import Dict, Any
 from pathlib import Path
 
 # Configuration for all data sources
@@ -43,11 +42,11 @@ CONFIG = {
 
 def clean_Customer_ID_col(df: pd.DataFrame) -> pd.DataFrame:
     # Standardize columns
-    for col in df.columns:
-        df[col] = df[col].strip().lower()
+    df.columns = [str(col).strip().lower() for col in df.columns]
+    df = df.applymap(lambda x: str(x).strip().lower() if pd.notnull(x) else x)
 
-    df = df[df['Customer ID'].str.match(r'^\d{4}-[A-Z]{5}$', na=False)]     # must match this *exact* pattern
-    df = df.drop_duplicates(subset=['Customer ID'])    # gotta be unique since its (almost always) our primary key
+    df = df[df['customer id'].str.match(r'^\d{4}-[a-z]{5}$', na=False)]  # pattern should also be lowercase
+    df = df.drop_duplicates(subset=['customer id'])
     return df
 
 
@@ -111,20 +110,22 @@ def telco_etl():
         original_rows = len(df)
 
         df = clean_Customer_ID_col(df)
+        logging.info("Cleaned customer id column!")
+        logging.info(f"{df.head()}")
 
         # Clean tenure field
-        df['Tenure'] = df['Tenure'].str.strip().str.strip("$").str.replace(' months', '')
-        df['Tenure'] = pd.to_numeric(df['Tenure'], errors='coerce')
+        df['tenure'] = df['tenure'].str.strip().str.strip("$").str.replace(' months', '')
+        df['tenure'] = pd.to_numeric(df['tenure'], errors='coerce')
 
         # Drop null or invalid rows
         df = df.replace('', pd.NA)
-        df = df.dropna(subset=['Customer ID', 'Tenure'])
-        df['Tenure'] = df['Tenure'].astype(int)
+        df = df.dropna(subset=['customer id', 'tenure'])
+        df['tenure'] = df['tenure'].astype(int)
 
         logging.info(f"Customer profile data transformed: {len(df)}/{original_rows} rows retained")
 
         # Save cleaned file
-        df = df.rename(columns={'Customer ID': 'customer_id', 'Tenure': 'tenure_months'})
+        df = df.rename(columns={'customer id': 'customer_id', 'tenure': 'tenure_months'})
         cleaned_path = Path(CONFIG['processed_data_path']) / 'churn_cleaned.csv'
         df[['customer_id', 'tenure_months']].to_csv(cleaned_path, index=False)
 
@@ -136,33 +137,33 @@ def telco_etl():
         original_rows = len(df)
 
         df = clean_Customer_ID_col(df)
+        logging.info("Cleaned Customer ID column!")
 
         # Clean Age column
-        df['Age'] = df['Age'].str.strip("$")
-        df['Age'] = pd.to_numeric(df['Age'], errors='coerce')
+        df['age'] = df['age'].str.strip("$")
+        df['age'] = pd.to_numeric(df['age'], errors='coerce')
 
         # Clean categorical column
-        df = df[df['Gender'].isin(['male', 'female'])]
+        df = df[df['gender'].isin(['male', 'female'])]
 
         # Clean the messy Boolean columns using mapping
-        df['Married'] = df['Married'].map(
-            lambda x: 'yes' if x in {'yes', 'partnered', 'married'} else ('no' if x in {'no', 'single', 'unmarried'} else pd.NA)
-        )
-        df = df[df['Dependents'].map(
-            lambda x: 'yes' if x in {'yes', 'children', 'kids', 'family'} else ('no' if x in {'no', 'false', '0', 'none'} else pd.NA)
-        )]
+        df['married'] = df['married'].map(lambda x: 1 if x in {'yes', 'partnered', 'married'} else (0 if x in {'no', 'single', 'unmarried'} else pd.NA))
+        df['dependents'] = df['dependents'].map(lambda x: 1 if x in {'yes', 'children', 'kids', 'family'} else (0 if x in {'no', 'false', '0', 'none'} else pd.NA))
+        df['under 30'] = df['under 30'].map(lambda x: 1 if x == 'yes' else (0 if x == 'no' else pd.NA))
+        df['senior citizen'] = df['senior citizen'].map(lambda x: 1 if x == 'yes' else (0 if x == 'no' else pd.NA))
 
-        df['Number of Dependents'] = pd.to_numeric(df['Number of Dependents'], errors='coerce')
+        logging.info(f"{df.head()}") # DataFrame Empty
+        df['number of dependents'] = pd.to_numeric(df['number of dependents'], errors='coerce')
 
         # Drop null or invalid rows
         df = df.replace('', pd.NA)
-        df = df.dropna(subset=['Customer ID', 'Gender', 'Age', 'Under 30', 'Senior Citizen', 'Married', 'Dependents', 'Number of Dependents'])
-        df['Age'] = df['Age'].astype(int)
-        df['Number of Dependents'] = df['Number of Dependents'].astype(int)
+        df = df.dropna(subset=['customer id', 'gender', 'age', 'under 30', 'senior citizen', 'married', 'dependents', 'number of dependents'])
+        df['age'] = df['age'].astype(int)
+        df['number of dependents'] = df['number of dependents'].astype(int)
 
         logging.info(f"Demographics data transformed: {len(df)}/{original_rows} rows retained")
         
-        df = df.rename(columns={'Customer ID': 'customer_id', 'Under 30': 'is_under_30', 'Senior Citizen': 'is_senior_citizen', 'Married': 'has_partner', 'Dependents': 'has_dependents', 'Number of Dependents': 'number_of_dependents'})
+        df = df.rename(columns={'customer id': 'customer_id', 'under 30': 'is_under_30', 'senior citizen': 'is_senior_citizen', 'married': 'has_partner', 'dependents': 'has_dependents', 'number of dependents': 'number_of_dependents'})
         cleaned_path = Path(CONFIG['processed_data_path']) / 'demographics_cleaned.csv'
         df[['customer_id', 'gender', 'age', 'is_under_30', 'is_senior_citizen', 'has_partner', 'has_dependents', 'number_of_dependents']].to_csv(cleaned_path, index=False)
 
@@ -174,22 +175,23 @@ def telco_etl():
         original_rows = len(df)
 
         df = clean_Customer_ID_col(df)
+        logging.info("Cleaned Customer ID column!")
 
         # Clean Zip Code column
-        df['Zip Code'] = df['Zip Code'].str.strip('$').str.replace(',', '')
-        df['Zip Code'] = pd.to_numeric(df['Zip Code'], errors='coerce')
+        df['zip code'] = df['zip code'].str.strip('$').str.replace(',', '')
+        df['zip code'] = pd.to_numeric(df['zip code'], errors='coerce')
 
         # Drop null or invalid rows
         df = df.replace('', pd.NA)
-        df = df.dropna(subset=['Customer ID', 'City', 'Zip Code'])
-        df['Zip Code'] = df['Zip Code'].astype(int)
+        df = df.dropna(subset=['customer id', 'city', 'zip code'])
+        df['zip code'] = df['zip code'].astype(int)
 
         logging.info(f"Location data transformed: {len(df)}/{original_rows} rows retained")
 
         # Save cleaned file
-        df = df.rename(columns={'Customer ID': 'customer_id', 'City': 'city', 'Zip Code': 'zip_code'})
+        df = df.rename(columns={'customer id': 'customer_id', 'zip code': 'zip_code'})
         cleaned_path = Path(CONFIG['processed_data_path']) / 'location_cleaned.csv'
-        df[['Customer ID', 'City', 'Zip Code']].to_csv(cleaned_path, index=False)
+        df[['customer_id', 'city', 'zip_code']].to_csv(cleaned_path, index=False)
 
 
     @task
@@ -199,28 +201,28 @@ def telco_etl():
         original_rows = len(df)
 
         # Standardize columns
-        for col in df.columns:
-            df[col] = df[col].strip().lower()
-        df = df.drop_duplicates(subset=['Zip Code'])    # gotta be unique since its our primary key
+        df.columns = [str(col).strip().lower() for col in df.columns]
+        df = df.applymap(lambda x: str(x).strip().lower() if pd.notnull(x) else x)
+        df = df.drop_duplicates(subset=['zip code'])    # gotta be unique since its our primary key
 
-        # Clean Zip Code column
-        df['Zip Code'] = df['Zip Code'].str.strip('$').str.replace(',', '')
-        df['Zip Code'] = pd.to_numeric(df['Zip Code'], errors='coerce')
+        # Clean zip code column
+        df['zip code'] = df['zip code'].str.strip('$').str.replace(',', '')
+        df['zip code'] = pd.to_numeric(df['zip code'], errors='coerce')
 
-        # Clean Population column
-        df['Population'] = df['Population'].str.strip('$').str.replace(',', '')
-        df['Population'] = pd.to_numeric(df['Population'], errors='coerce')
+        # Clean population column
+        df['population'] = df['population'].str.strip('$').str.replace(',', '')
+        df['population'] = pd.to_numeric(df['population'], errors='coerce')
 
         # Drop null or invalid rows
         df = df.replace('', pd.NA)
-        df = df.dropna(subset=['Zip Code', 'Population'])
-        df['Zip Code'] = df['Zip Code'].astype(int)
-        df['Population'] = df['Population'].astype(int)
+        df = df.dropna(subset=['zip code', 'population'])
+        df['zip code'] = df['zip code'].astype(int)
+        df['population'] = df['population'].astype(int)
 
-        logging.info(f"Population data transformed: {len(df)}/{original_rows} rows retained")
+        logging.info(f"population data transformed: {len(df)}/{original_rows} rows retained")
 
         # Save cleaned file
-        df = df.rename(columns={'Zip Code': 'zip_code', 'Population': 'population'})
+        df = df.rename(columns={'zip code': 'zip_code'})
         cleaned_path = Path(CONFIG['processed_data_path']) / 'population_cleaned.csv'
         df[['zip_code', 'population']].to_csv(cleaned_path, index=False)
 
@@ -229,31 +231,36 @@ def telco_etl():
         """Transform services data"""
         df = pd.read_csv(file_path)
         original_rows = len(df)
-        df_fields = ['Customer ID', 'Referred a Friend', 'Number of Referrals', 'Phone Service', 'Multiple Lines', 'Internet Service', 'Internet Type', 'Online Security', 'Online Backup', 'Avg Monthly Long Distance Charges', 'Avg Monthly GB Download', 'Online Security', 'Online Backup', 'Device Protection Plan', 'Premium Tech Support', 'Streaming TV', 'Streaming Movies', 'Streaming Music', 'Unlimited Data']
+        df_fields = ['customer id', 'referred a friend', 'number of referrals', 'phone service', 'multiple lines', 'internet service', 'internet type', 'avg monthly long distance charges', 'avg monthly gb download', 'online security', 'online backup', 'device protection plan', 'premium tech support', 'streaming tv', 'streaming movies', 'streaming music', 'unlimited data']
 
         df = clean_Customer_ID_col(df)
+        logging.info("Cleaned customer id column!")
 
         # Clean boolean columns
-        df['Phone Service'] = df['Phone Service'].map(lambda x: 'yes' if x in {'yes', 'active', 'enabled'} else ('no' if x in {'no', 'none'} else pd.NA))
-        df['Multiple Lines'] = df['Multiple Lines'].map(lambda x: 'yes' if x in {'yes', 'multiple'} else ('no' if x in {'no', 'none'} else pd.NA))
-        df['Internet Service'] = df['Internet Service'].map(lambda x: 'yes' if x == 'yes' else ('no' if x in {'no', 'none'} else pd.NA))
-        df['Online Security'] = df['Online Security'].map(lambda x: 'yes' if x in {'yes', 'enabled'} else ('no' if x in {'no', 'none'} else pd.NA))
-        df['Online Backup'] = df['Online Backup'].map(lambda x: 'yes' if x in {'yes', 'enabled'} else ('no' if x in {'no', 'none'} else pd.NA))
+        df['phone service'] = df['phone service'].map(lambda x: 1 if x in {'yes', 'active', 'enabled'} else (0 if x in {'no', 'none'} else pd.NA))
+        df['multiple lines'] = df['multiple lines'].map(lambda x: 1 if x in {'yes', 'multiple'} else (0 if x in {'no', 'none'} else pd.NA))
+        df['internet service'] = df['internet service'].map(lambda x: 1 if x == 'yes' else (0 if x in {'no', 'none'} else pd.NA))
+        df['online security'] = df['online security'].map(lambda x: 1 if x in {'yes', 'enabled'} else (0 if x in {'no', 'none'} else pd.NA))
+        df['online backup'] = df['online backup'].map(lambda x: 1 if x in {'yes', 'enabled'} else (0 if x in {'no', 'none'} else pd.NA))
+
+        simple_bool_cols = ['device protection plan', 'premium tech support', 'streaming tv', 'streaming movies', 'streaming music', 'unlimited data', 'referred a friend']
+        for col in simple_bool_cols:
+            df[col] = df[col].map(lambda x: 1 if x == 'yes' else (0 if x == 'no' else pd.NA))
 
         # Clean categorial column
-        df['Internet Type'] = df['Internet Type'].map(lambda x: x if x in {'dsl', 'fiber optic'} else ('none' if x == '' else pd.NA))
+        df['internet type'] = df['internet type'].map(lambda x: x if x in {'dsl', 'fiber optic'} else ('none' if x == '' else pd.NA))
 
         # Drop null or invalid rows
         df = df.replace('', pd.NA)
-        df = df.dropna(subset=[df_fields])
-        df['Number of Referrals'] = df['Number of Referrals'].astype(int)
-        df['Avg Monthly Long Distance Charges'] = df['Avg Monthly Long Distance Charges'].astype(int)
-        df['Avg Monthly GB Download'] = df['Avg Monthly GB Download'].astype(int)
+        df = df.dropna(subset=df_fields)
+        df['number of referrals'] = df['number of referrals'].astype(int)
+        df['avg monthly long distance charges'] = df['avg monthly long distance charges'].astype(float)
+        df['avg monthly gb download'] = df['avg monthly gb download'].astype(int)
 
         logging.info(f"Services data transformed: {len(df)}/{original_rows} rows retained")
 
         # Save cleaned file
-        df = df.rename(columns={'Customer ID': 'customer_id', 'Referred a Friend': 'has_referred_a_friend', 'Number of Referrals': 'number_of_referrals', 'Phone Service': 'has_phone_service', 'Multiple Lines': 'has_multiple_lines', 'Internet Service': 'has_internet_service', 'Internet Type': 'internet_service_type', 'Online Security': 'has_online_security', 'Online Backup': 'has_online_backup', 'Avg Monthly Long Distance Charges': 'avg_monthly_long_distance_charges', 'Avg Monthly GB Download': 'avg_monthly_gb_download', 'Device Protection Plan': 'has_device_protection', 'Premium Tech Support': 'has_tech_support', 'Streaming TV': 'has_tv', 'Streaming Movies': 'has_movies', 'Streaming Music': 'has_music', 'Unlimited Data': 'has_unlimited_data'})
+        df = df.rename(columns={'customer id': 'customer_id', 'referred a friend': 'has_referred_a_friend', 'number of referrals': 'number_of_referrals', 'phone service': 'has_phone_service', 'multiple lines': 'has_multiple_lines', 'internet service': 'has_internet_service', 'internet type': 'internet_service_type', 'online security': 'has_online_security', 'online backup': 'has_online_backup', 'avg monthly long distance charges': 'avg_monthly_long_distance_charges', 'avg monthly gb download': 'avg_monthly_gb_download', 'device protection plan': 'has_device_protection', 'premium tech support': 'has_tech_support', 'streaming tv': 'has_tv', 'streaming movies': 'has_movies', 'streaming music': 'has_music', 'unlimited data': 'has_unlimited_data'})
         cleaned_path = Path(CONFIG['processed_data_path']) / 'services_cleaned.csv'
         df[['customer_id', 'has_referred_a_friend', 'number_of_referrals', 'has_phone_service', 'has_multiple_lines', 'has_internet_service', 'internet_service_type', 'has_online_security', 'has_online_backup', 'avg_monthly_long_distance_charges', 'avg_monthly_gb_download', 'has_device_protection', 'has_tech_support', 'has_tv', 'has_movies', 'has_music', 'has_unlimited_data']].to_csv(cleaned_path, index=False)
 
@@ -265,20 +272,21 @@ def telco_etl():
         original_rows = len(df)
 
         df = clean_Customer_ID_col(df)
+        logging.info("Cleaned customer id column!")
 
         # Clean Boolean column
-        df['Paperless Billing'] = df['Paperless Billing'].map(lambda x: 'yes' if x in {'yes', 'electronic', 'digital'} else ('no' if x in {'no', 'paper', 'mail'} else pd.NA))
+        df['paperless billing'] = df['paperless billing'].map(lambda x: 1 if x in {'yes', 'electronic', 'digital'} else (0 if x in {'no', 'paper', 'mail'} else pd.NA))
 
         # Clean numeric columns
-        df['Total Charges'] = df['Total Charges'].str.strip("$").str.replace(',', '')
+        df['total charges'] = df['total charges'].str.strip("$").str.replace(',', '')
         
-        numeric_cols = ['Monthly Charge', 'Total Charges', 'Total Refunds', 'Total Extra Data Charges', 'Total Long Distance Charges', 'Total Revenue']
+        numeric_cols = ['monthly charge', 'total charges', 'total refunds', 'total extra data charges', 'total long distance charges', 'total revenue']
         for col in numeric_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
         # Drop null or invalid rows
         df = df.replace('', pd.NA)
-        df = df.dropna(subset=['Customer ID', 'Contract', 'Paperless Billing', 'Payment Method'] + numeric_cols)
+        df = df.dropna(subset=['customer id', 'contract', 'paperless billing', 'payment method'] + numeric_cols)
         
         for col in numeric_cols:
             df[col] = df[col].astype(float)
@@ -287,7 +295,7 @@ def telco_etl():
         logging.info(f"Financials data transformed: {len(df)}/{original_rows} rows retained")
 
         # Return data frame
-        df = df.rename(columns={'Customer ID': 'customer_id', 'Contract': 'contract_type', 'Paperless Billing': 'has_paperless_billing', 'Payment Method': 'payment_method', 'Monthly Charge': 'monthly_charges', 'Total Charges': 'total_charges', 'Total Refunds': 'total_refunds', 'Total Extra Data Charges': 'total_extra_data_charges', 'Total Long Distance Charges': 'total_long_distance_charges', 'Total Revenue': 'total_revenue'})
+        df = df.rename(columns={'customer id': 'customer_id', 'contract': 'contract_type', 'paperless billing': 'has_paperless_billing', 'payment method': 'payment_method', 'monthly charge': 'monthly_charges', 'total charges': 'total_charges', 'total refunds': 'total_refunds', 'total extra data charges': 'total_extra_data_charges', 'total long distance charges': 'total_long_distance_charges', 'total revenue': 'total_revenue'})
         cleaned_path = Path(CONFIG['processed_data_path']) / 'financials_cleaned.csv'
         df[['customer_id', 'contract_type', 'has_paperless_billing', 'payment_method', 'monthly_charges', 'total_charges', 'total_refunds', 'total_extra_data_charges', 'total_long_distance_charges', 'total_revenue']].to_csv(cleaned_path, index=False)
 
@@ -299,80 +307,87 @@ def telco_etl():
         original_rows = len(df)
 
         df = clean_Customer_ID_col(df)
+        logging.info("Cleaned customer id column!")
 
         # Clean numerical columns
-        num_cols = ['CLTV', 'Satisfaction Score', 'Churn Score']
+        num_cols = ['cltv', 'satisfaction score', 'churn score']
         for col in num_cols:
             df[col] = df[col].str.strip('$').str.replace(',', '')
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
         # Clean categorial column
-        df['Churn Category'] = df['Churn Category'].map(lambda x: x if x in {'competitor', 'dissatisfaction', 'attitude', 'price', 'other'} else ('not_specified' if x == '' else pd.NA))
+        df['churn category'] = df['churn category'].map(lambda x: x if x in {'competitor', 'dissatisfaction', 'attitude', 'price', 'other'} else ('not_specified' if x == '' else pd.NA))
 
         # Drop null or invalid rows
         df = df.replace('', pd.NA)
-        df = df.dropna(subset=['Customer ID', 'Satisfaction Score', 'Churn Label', 'Churn Score', 'CLTV', 'Churn Category'])
+        df = df.dropna(subset=['customer id', 'satisfaction score', 'churn value', 'churn score', 'cltv', 'churn category'])
 
         logging.info(f"Status data transformed: {len(df)}/{original_rows} rows retained")
 
         # Return data frame
-        df = df.rename(columns={'Customer ID': 'customer_id', 'Satisfaction Score': 'satisfaction_score', 'Churn Label': 'churn_label', 'Churn Score': 'churn_score', 'CLTV': 'cltv', 'Churn Category': 'churn_category'})
+        df = df.rename(columns={'customer id': 'customer_id', 'satisfaction score': 'satisfaction_score', 'churn value': 'churn_label', 'churn score': 'churn_score', 'churn category': 'churn_category'})
         cleaned_path = Path(CONFIG['processed_data_path']) / 'status_cleaned.csv'
         df[['customer_id', 'satisfaction_score', 'churn_label', 'churn_score', 'cltv', 'churn_category']].to_csv(cleaned_path, index=False)
 
 
     @task
-    def load_to_database(table_name: str, df: pd.DataFrame):
+    def load_to_database(table_name: str, file_path: str):
         """Load cleaned data to MySQL database"""
 
         hook = MySqlHook(mysql_conn_id=CONFIG['mysql_conn_id'])
         cnx = hook.get_conn()
         engine = create_engine(hook.get_uri(), creator=lambda: cnx)
        
-        df.to_sql(name=table_name, con=engine, if_exists='replace', index=False)
+        df = pd.read_csv(file_path)
+        
+        with engine.connect() as conn:
+            conn.execute("SET FOREIGN_KEY_CHECKS=0;")
+            df.to_sql(name=table_name, con=conn, if_exists='append', index=False)
+            # Add unique index for foreign key support if needed
+            if table_name == 'customer_profile':
+                conn.execute("ALTER TABLE customer_profile ADD UNIQUE (customer_id);")
+            if table_name == 'population':
+                conn.execute("ALTER TABLE population ADD UNIQUE (zip_code);")
+            conn.execute("SET FOREIGN_KEY_CHECKS=1;")
 
         engine.dispose()
 
         logging.info(f"Successfully loaded {len(df)} {table_name} records")
     
     # Extract all sources into dataframes
-    extracted_dataframes = {}
     for source in DATA_SOURCES.keys():
         validate_source(source)
     
     # Transform dataframes (dependency is implicit here since we are using the output of one task as input to another)
-    transformed_dataframes = {}
 
-    # transformed_dataframes['customer_profile'] = transform_customer_profile_data(extracted_dataframes['customer_profile'])
-    # transformed_dataframes['demographics'] = transform_demographics_data(extracted_dataframes['demographics'])
+    transform_customer_profile_data(DATA_SOURCES['customer_profile']['file_path'])
+    transform_demographics_data(DATA_SOURCES['demographics']['file_path'])
 
-    # transformed_dataframes['location'] = transform_location_data(extracted_dataframes['location'])
-    # transformed_dataframes['population'] = transform_population_data(extracted_dataframes['population'])
+    transform_location_data(DATA_SOURCES['location']['file_path'])
+    transform_population_data(DATA_SOURCES['population']['file_path'])
 
-    # transformed_dataframes['services'] = transform_services_data(extracted_dataframes['services'])
-    # transformed_dataframes['financials'] = transform_financials_data(extracted_dataframes['services'])
+    transform_services_data(DATA_SOURCES['services']['file_path'])
+    transform_financials_data(DATA_SOURCES['services']['file_path'])
 
-    # transformed_dataframes['status'] = transform_status_data(extracted_dataframes['status'])
+    transform_status_data(DATA_SOURCES['status']['file_path'])
 
-    # # Load dataframes into database
-    # load_customer_profile = load_to_database('customer_profile', Path(CONFIG['processed_data_path']) / 'churn_cleaned.csv')     # everything is dependent on customer profile data
+    # Load dataframes into database
+    load_customer_profile = load_to_database('customer_profile', Path(CONFIG['processed_data_path']) / 'churn_cleaned.csv')     # everything is dependent on customer profile data
 
-    # # Load population and location with explicit dependency
-    # load_population = load_to_database('population', transformed_dataframes['population'])
-    # load_location = load_to_database('location', transformed_dataframes['location'])
-    # load_population >> load_location
+    # Load population and location with explicit dependency
+    load_population = load_to_database('population', Path(CONFIG['processed_data_path']) / 'population_cleaned.csv')
+    load_location = load_to_database('location', Path(CONFIG['processed_data_path']) / 'location_cleaned.csv')
+    load_customer_profile >> load_population >> load_location
+    
+    # Load remaining sources while keeping dependencies in mind
+    load_tasks = []
+    for name in ['demographics', 'services', 'financials', 'status']:
+        load_task = load_to_database(name, Path(CONFIG['processed_data_path']) / f'{name}_cleaned.csv')
+        load_tasks.append(load_task)
+        # customer_profile must load before all other tables
+        load_customer_profile >> load_task
 
-    # # Load remaining sources while keeping dependencies in mind
-    # load_tasks = []
-    # for name, df in transformed_dataframes.items():
-    #     if name not in ['customer_profile', 'population', 'location']:
-    #         load_task = load_to_database(name, df)
-    #         load_tasks.append(load_task)
-    #         # customer_profile must load before all other tables
-    #         load_customer_profile >> load_task
-
-    # load_customer_profile >> load_population
-    # load_customer_profile >> load_location
+    
 
 # Instantiate the DAG
 telco_etl()
