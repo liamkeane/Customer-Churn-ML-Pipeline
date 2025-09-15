@@ -120,7 +120,8 @@ create table status (
         'dissatisfaction',
         'attitude',
         'price',
-        'other'
+        'other',
+        'not applicable'
     ) not null,
     
     foreign key (customer_id) references customer_profile(customer_id)

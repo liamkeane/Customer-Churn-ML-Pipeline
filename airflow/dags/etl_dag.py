@@ -316,7 +316,7 @@ def telco_etl():
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
         # Clean categorial column
-        df['churn category'] = df['churn category'].map(lambda x: x if x in {'competitor', 'dissatisfaction', 'attitude', 'price', 'other'} else ('not_specified' if x == '' else pd.NA))
+        df['churn category'] = df['churn category'].map(lambda x: x if x in {'competitor', 'dissatisfaction', 'attitude', 'price', 'other'} else 'not applicable')
 
         # Drop null or invalid rows
         df = df.replace('', pd.NA)
