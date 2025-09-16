@@ -22,4 +22,5 @@ RUN pip install --no-cache-dir \
     pandas-profiling \
     seaborn \
     scikit-learn \
-    pyarrow
+    pyarrow \
+    pymysql
