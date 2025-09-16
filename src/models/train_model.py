@@ -1,3 +1,4 @@
+import json
 import pandas as pd
 import numpy as np
 import joblib
@@ -35,25 +36,16 @@ class TelcoChurnModel:
             print(f"Error connecting to database: {e}")
             return False
     
-    def load_data(self, query=None, table_name=None):
+    def load_data(self, query):
         """
         Load data from MySQL database
-        
-        Either provide a custom query OR a table_name
         """
         if not self.engine:
             if not self.connect_to_database():
                 return None
-        
-        try:
-            if query:
-                df = pd.read_sql(query, self.engine)
-            elif table_name:
-                df = pd.read_sql(f"SELECT * FROM {table_name}", self.engine)
-            else:
-                # Default query for typical telco churn table structure
-                df = pd.read_sql("SELECT * FROM telco_churn", self.engine)
             
+        try:
+            df = pd.read_sql(query, self.engine)
             print(f"Loaded {len(df)} rows and {len(df.columns)} columns")
             return df
             
@@ -324,105 +316,147 @@ class TelcoChurnModel:
 # Example usage
 def main():
     # Database configuration for Docker MySQL
-    db_config = {
-        'host': 'localhost',
-        'port': 3307,
-        'user': 'your_username',
-        'password': 'your_password',
-        'database': 'your_database_name'
-    }
+    with open('config.json') as f:
+        db_config = json.load(f)
     
-    # Initialize the model
-    churn_model = TelcoChurnModel(db_config)
-    
-    # Check if a trained model already exists
-    if churn_model.model_exists():
-        print("Found existing trained model!")
-        choice = input("Do you want to (1) Load existing model or (2) Train new model? Enter 1 or 2: ")
+        # Initialize the model
+        churn_model = TelcoChurnModel(db_config)
         
-        if choice == '1':
-            # Load existing model
-            if churn_model.load_model():
-                print("Model loaded successfully! You can now make predictions.")
-                # Example: Load some data for prediction
-                df = churn_model.load_data(table_name='telco_churn')
-                if df is not None:
-                    sample_data = df.drop('Churn', axis=1).head(5)  # Remove target column
-                    predictions, probabilities = churn_model.predict_new_data(sample_data)
-                    print(f"Sample predictions: {predictions}")
-                return
-        else:
-            print("Training new model...")
-    
-    # Train new model
-    print("Loading data from database...")
-    df = churn_model.load_data(table_name='telco_churn')
-    
-    # Option for custom query (if you need to join tables, etc.)
-    # custom_query = """
-    # SELECT c.*, d.demographic_info 
-    # FROM customers c 
-    # LEFT JOIN demographics d ON c.customer_id = d.customer_id
-    # """
-    # df = churn_model.load_data(query=custom_query)
-    
-    if df is not None:
-        # Preprocess the data
-        print("Preprocessing data...")
-        X, y = churn_model.preprocess_data(df, target_column='Churn')
+        # Check if a trained model already exists
+        if churn_model.model_exists():
+            print("Found existing trained model!")
+            choice = input("Do you want to (1) Load existing model or (2) Train new model? Enter 1 or 2: ")
+            
+            if choice == '1':
+                # Load existing model
+                if churn_model.load_model():
+                    print("Model loaded successfully! You can now make predictions.")
+                    # Example: Load some data for prediction
+                    df = churn_model.load_data(table_name='telco_churn')
+                    if df is not None:
+                        sample_data = df.drop('Churn', axis=1).head(5)  # Remove target column
+                        predictions, probabilities = churn_model.predict_new_data(sample_data)
+                        print(f"Sample predictions: {predictions}")
+                    return
+            else:
+                print("Training new model...")
         
-        # Train the model
-        print("Training model...")
-        results = churn_model.train_model(X, y)
+        # Train new model
+        print("Loading data from database...")
+
+        aggregation_query = '''select
+                    c.customer_id,
+                    c.tenure_months,
+                    d.gender,
+                    d.age,
+                    d.is_under_30,
+                    d.is_senior_citizen,
+                    d.has_partner,
+                    d.has_dependents,
+                    d.number_of_dependents,
+                    l.city,
+                    l.zip_code,
+                    p.population,
+                    f.contract_type,
+                    f.has_paperless_billing,
+                    f.payment_method,
+                    f.monthly_charges,
+                    f.total_charges,
+                    f.total_refunds,
+                    f.total_extra_data_charges,
+                    f.total_long_distance_charges,
+                    f.total_revenue,
+                    se.has_referred_a_friend,
+                    se.number_of_referrals,
+                    se.has_phone_service,
+                    se.avg_monthly_long_distance_charges,
+                    se.has_multiple_lines,
+                    se.has_internet_service,
+                    se.internet_service_type,
+                    se.avg_monthly_gb_download,
+                    se.has_online_security,
+                    se.has_online_backup,
+                    se.has_device_protection,
+                    se.has_tech_support,
+                    se.has_tv,
+                    se.has_movies,
+                    se.has_music,
+                    se.has_unlimited_data,
+                    st.satisfaction_score,
+                    st.churn_label,
+                    st.churn_score,
+                    st.cltv,
+                    st.churn_category
+                from customer_profile c
+                inner join demographics d on c.customer_id = d.customer_id
+                inner join location l on c.customer_id = l.customer_id
+                inner join population p on l.zip_code = p.zip_code
+                inner join financials f on c.customer_id = f.customer_id
+                inner join services se on c.customer_id = se.customer_id
+                inner join status st on c.customer_id = st.customer_id;'''
+
+        df = churn_model.load_data(query=aggregation_query)
+
+        # Option for custom query (if you need to join tables, etc.)
+        # custom_query = """
+        # SELECT c.*, d.demographic_info 
+        # FROM customers c 
+        # LEFT JOIN demographics d ON c.customer_id = d.customer_id
+        # """
+        # df = churn_model.load_data(query=custom_query)
         
-        # Get feature importance
-        feature_importance = churn_model.get_feature_importance(X.columns)
-        
-        # Save the trained model
-        print("\nSaving model...")
-        metadata_file = churn_model.save_model()
-        
-        print("\nModel training completed successfully!")
-        print("Next time you run this program, you can choose to load this trained model instead of retraining.")
+        if df is not None:
+            # Preprocess the data
+            print("Preprocessing data...")
+            X, y = churn_model.preprocess_data(df, target_column='Churn')
+            
+            # Train the model
+            print("Training model...")
+            results = churn_model.train_model(X, y)
+            
+            # Get feature importance
+            feature_importance = churn_model.get_feature_importance(X.columns)
+            
+            # Save the trained model
+            print("\nSaving model...")
+            metadata_file = churn_model.save_model()
+            
+            print("\nModel training completed successfully!")
+            print("Next time you run this program, you can choose to load this trained model instead of retraining.")
 
 def predict_only():
     """
     Function to only make predictions using a saved model
     """
-    db_config = {
-        'host': 'localhost',
-        'port': 3307,
-        'user': 'your_username',
-        'password': 'your_password',
-        'database': 'your_database_name'
-    }
+    with open('config.json') as f:
+        db_config = json.load(f)
     
-    churn_model = TelcoChurnModel(db_config)
-    
-    # List available models
-    churn_model.list_saved_models()
-    
-    # Load the latest model
-    if churn_model.load_model():
-        print("Model loaded! Ready for predictions.")
+        churn_model = TelcoChurnModel(db_config)
         
-        # Load new data for prediction
-        df = churn_model.load_data(table_name='new_customers')  # or whatever table
-        if df is not None:
-            # Remove target column if it exists
-            if 'Churn' in df.columns:
-                df = df.drop('Churn', axis=1)
+        # List available models
+        churn_model.list_saved_models()
+        
+        # Load the latest model
+        if churn_model.load_model():
+            print("Model loaded! Ready for predictions.")
             
-            predictions, probabilities = churn_model.predict_new_data(df)
-            
-            # Add predictions to dataframe
-            df['Churn_Prediction'] = predictions
-            df['Churn_Probability'] = probabilities[:, 1]  # Probability of churning
-            
-            print("Predictions completed!")
-            print(df[['Churn_Prediction', 'Churn_Probability']].head())
-    else:
-        print("No trained model found. Please train a model first.")
+            # Load new data for prediction
+            df = churn_model.load_data(table_name='new_customers')  # or whatever table
+            if df is not None:
+                # Remove target column if it exists
+                if 'Churn' in df.columns:
+                    df = df.drop('Churn', axis=1)
+                
+                predictions, probabilities = churn_model.predict_new_data(df)
+                
+                # Add predictions to dataframe
+                df['Churn_Prediction'] = predictions
+                df['Churn_Probability'] = probabilities[:, 1]  # Probability of churning
+                
+                print("Predictions completed!")
+                print(df[['Churn_Prediction', 'Churn_Probability']].head())
+        else:
+            print("No trained model found. Please train a model first.")
 
 if __name__ == "__main__":
     main()
