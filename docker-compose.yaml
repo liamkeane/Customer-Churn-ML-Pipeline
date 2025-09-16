@@ -87,59 +87,39 @@ services:
     networks:
       - telco_network
 
-  # https://medium.com/@opcfrance/setting-up-apache-airflow-with-docker-a-comprehensive-guide-with-examples-c041fed1c3f5
-
-  # # Jupyter Lab for development and analysis
-  # jupyter:
-  #   image: jupyter/datascience-notebook:latest
-  #   container_name: jupyter-lab
-  #   restart: always
-  #   environment:
-  #     JUPYTER_ENABLE_LAB: "yes"
-  #     JUPYTER_TOKEN: ${JUPYTER_TOKEN}
-  #     GRANT_SUDO: "yes"
-  #   ports:
-  #     - "8888:8888"
-  #   volumes:
-  #     - ./notebooks:/home/jovyan/work
-  #     - ./data:/home/jovyan/data
-  #     - jupyter-user-settings:/home/jovyan/.jupyter
-  #   networks:
-  #     - telco_network
-  #   depends_on:
-  #     - mysql
-
-
-  # MLflow for experiment tracking and model management
-  # mlflow:
-  #   build:
-  #     context: .
-  #     dockerfile: ./docker/mlflow/Dockerfile
-  #   container_name: churn_mlflow
-  #   environment:
-  #     MLFLOW_BACKEND_STORE_URI: mysql+pymysql://airflow_user:airflow_password@mysql:3306/churn_analytics
-  #     MLFLOW_DEFAULT_ARTIFACT_ROOT: /mlflow/artifacts
-  #   ports:
-  #     - "5000:5000"
-  #   volumes:
-  #     - mlflow_artifacts:/mlflow/artifacts
-  #   depends_on:
-  #     mysql:
-  #       condition: service_healthy
-  #   networks:
-  #     - telco_network
-  #   command: >
-  #     mlflow server
-  #     --backend-store-uri mysql+pymysql://airflow_user:airflow_password@mysql:3306/churn_analytics
-  #     --default-artifact-root /mlflow/artifacts
-  #     --host 0.0.0.0
-  #     --port 5000
+  # Jupyter Lab for development and analysis
+  jupyter:
+    container_name: jupyter
+    build:
+      context: .
+      dockerfile: ./docker/jupyter/Dockerfile
+    restart: always
+    depends_on:
+      - mysql
+    environment:
+      # Database connection
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_USER: ${MYSQL_USER}
+      DB_PASSWORD: ${MYSQL_PASSWORD}
+      DB_NAME: ${MYSQL_DATABASE}
+      # Jupyter settings
+      JUPYTER_ENABLE_LAB: "yes"
+      GRANT_SUDO: "yes"
+    volumes:
+      - ./notebooks:/home/jovyan/work
+      - ./data/interim:/home/jovyan/data/interim
+      - ./data/processed:/home/jovyan/data/processed
+    ports:
+      - "8888:8888"
+    command: ["start-notebook.sh", "--NotebookApp.token='${JUPYTER_TOKEN}'", "--NotebookApp.password=''"]
+    networks:
+      - telco_network
 
 volumes:
   mysql_data:
   postgres_data:
-  # mlflow_artifacts:
-  # jupyter-user-settings:
+  jupyter_user_settings:
 
 networks:
   telco_network:

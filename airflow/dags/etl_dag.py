@@ -231,7 +231,7 @@ def telco_etl():
         """Transform services data"""
         df = pd.read_csv(file_path)
         original_rows = len(df)
-        df_fields = ['customer id', 'referred a friend', 'number of referrals', 'phone service', 'multiple lines', 'internet service', 'internet type', 'avg monthly long distance charges', 'avg monthly gb download', 'online security', 'online backup', 'device protection plan', 'premium tech support', 'streaming tv', 'streaming movies', 'streaming music', 'unlimited data']
+        df_fields = ['customer id', 'referred a friend', 'number of referrals', 'phone service', 'multiple lines', 'internet service', 'avg monthly long distance charges', 'avg monthly gb download', 'online security', 'online backup', 'device protection plan', 'premium tech support', 'streaming tv', 'streaming movies', 'streaming music', 'unlimited data']
 
         df = clean_Customer_ID_col(df)
         logging.info("Cleaned customer id column!")
@@ -247,9 +247,6 @@ def telco_etl():
         for col in simple_bool_cols:
             df[col] = df[col].map(lambda x: 1 if x == 'yes' else (0 if x == 'no' else pd.NA))
 
-        # Clean categorial column
-        df['internet type'] = df['internet type'].map(lambda x: x if x in {'dsl', 'fiber optic'} else ('none' if x == '' else pd.NA))
-
         # Drop null or invalid rows
         df = df.replace('', pd.NA)
         df = df.dropna(subset=df_fields)
@@ -260,9 +257,9 @@ def telco_etl():
         logging.info(f"Services data transformed: {len(df)}/{original_rows} rows retained")
 
         # Save cleaned file
-        df = df.rename(columns={'customer id': 'customer_id', 'referred a friend': 'has_referred_a_friend', 'number of referrals': 'number_of_referrals', 'phone service': 'has_phone_service', 'multiple lines': 'has_multiple_lines', 'internet service': 'has_internet_service', 'internet type': 'internet_service_type', 'online security': 'has_online_security', 'online backup': 'has_online_backup', 'avg monthly long distance charges': 'avg_monthly_long_distance_charges', 'avg monthly gb download': 'avg_monthly_gb_download', 'device protection plan': 'has_device_protection', 'premium tech support': 'has_tech_support', 'streaming tv': 'has_tv', 'streaming movies': 'has_movies', 'streaming music': 'has_music', 'unlimited data': 'has_unlimited_data'})
+        df = df.rename(columns={'customer id': 'customer_id', 'referred a friend': 'has_referred_a_friend', 'number of referrals': 'number_of_referrals', 'phone service': 'has_phone_service', 'multiple lines': 'has_multiple_lines', 'internet service': 'has_internet_service', 'online security': 'has_online_security', 'online backup': 'has_online_backup', 'avg monthly long distance charges': 'avg_monthly_long_distance_charges', 'avg monthly gb download': 'avg_monthly_gb_download', 'device protection plan': 'has_device_protection', 'premium tech support': 'has_tech_support', 'streaming tv': 'has_tv', 'streaming movies': 'has_movies', 'streaming music': 'has_music', 'unlimited data': 'has_unlimited_data'})
         cleaned_path = Path(CONFIG['processed_data_path']) / 'services_cleaned.csv'
-        df[['customer_id', 'has_referred_a_friend', 'number_of_referrals', 'has_phone_service', 'has_multiple_lines', 'has_internet_service', 'internet_service_type', 'has_online_security', 'has_online_backup', 'avg_monthly_long_distance_charges', 'avg_monthly_gb_download', 'has_device_protection', 'has_tech_support', 'has_tv', 'has_movies', 'has_music', 'has_unlimited_data']].to_csv(cleaned_path, index=False)
+        df[['customer_id', 'has_referred_a_friend', 'number_of_referrals', 'has_phone_service', 'has_multiple_lines', 'has_internet_service', 'has_online_security', 'has_online_backup', 'avg_monthly_long_distance_charges', 'avg_monthly_gb_download', 'has_device_protection', 'has_tech_support', 'has_tv', 'has_movies', 'has_music', 'has_unlimited_data']].to_csv(cleaned_path, index=False)
 
 
     @task

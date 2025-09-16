@@ -67,7 +67,6 @@ create table services (
 
     -- internet service
     has_internet_service boolean not null,
-    internet_service_type enum('none', 'dsl', 'fiber optic') not null,
     avg_monthly_gb_download decimal(10,2) not null check (avg_monthly_gb_download >= 0),
 
     -- internet addons
