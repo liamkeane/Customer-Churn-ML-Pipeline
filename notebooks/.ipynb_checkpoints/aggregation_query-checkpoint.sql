@@ -1,5 +1,4 @@
 select
-	c.customer_id,
 	c.tenure_months,
 	d.age,
 	d.is_under_30,
@@ -7,9 +6,6 @@ select
     d.has_partner,
     d.has_dependents,
     d.number_of_dependents,
-    l.city,
-    l.zip_code,
-    p.population,
     f.contract_type,
     f.has_paperless_billing,
     f.payment_method,
@@ -33,12 +29,10 @@ select
     se.has_music,
     se.has_unlimited_data,
     st.satisfaction_score,
-    st.churn_label,
-    st.churn_score
+    st.churn_score,
+    st.churn_label
 from customer_profile c
 left join demographics d on c.customer_id = d.customer_id
-left join location l on c.customer_id = l.customer_id
-inner join population p on l.zip_code = p.zip_code
 left join financials f on c.customer_id = f.customer_id
 left join services se on c.customer_id = se.customer_id
 left join status st on c.customer_id = st.customer_id;
